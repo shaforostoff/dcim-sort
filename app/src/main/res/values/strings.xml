@@ -59,6 +59,7 @@
 
     <!-- Misc -->
     <string name="unknown_place">Unknown</string>
+    <string name="today">Today</string>
     <string name="select_folder_first">Select a folder first.</string>
     <string name="no_photos">No photos in this folder.</string>
 </resources>

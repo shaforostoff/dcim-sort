@@ -372,6 +372,19 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             updateDateLabels();
             recomputeSummary();
         }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH));
+        dlg.setButton(android.content.DialogInterface.BUTTON_NEUTRAL, getString(R.string.today),
+                (dialog, which) -> {
+                    long now = System.currentTimeMillis();
+                    if (isFrom) {
+                        rangeFrom = startOfDay(now);
+                        if (rangeTo < rangeFrom) rangeTo = endOfDay(now);
+                    } else {
+                        rangeTo = endOfDay(now);
+                        if (rangeFrom > rangeTo) rangeFrom = startOfDay(now);
+                    }
+                    updateDateLabels();
+                    recomputeSummary();
+                });
         dlg.show();
     }
 
