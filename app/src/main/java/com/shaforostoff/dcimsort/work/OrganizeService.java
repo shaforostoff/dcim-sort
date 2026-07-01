@@ -130,6 +130,7 @@ public class OrganizeService extends Service {
                 new ThreadPoolExecutor.CallerRunsPolicy());
 
         final int total = req.images.size();
+        final boolean skipLowGain = req.skipLowGain;
         final AtomicInteger done = new AtomicInteger();
         final AtomicInteger moved = new AtomicInteger();
         final AtomicInteger skipped = new AtomicInteger();
@@ -153,6 +154,11 @@ public class OrganizeService extends Service {
                     if (copy) {
                         File temp = recompress
                                 ? rc.compressToTemp(img.readUri(), req.mode, req.quality) : null;
+                        // skip-low-gain: too little saved → import the original untouched (temp=null).
+                        if (lowGain(skipLowGain, temp, img)) {
+                            temp.delete();
+                            temp = null;
+                        }
                         boolean ok;
                         try {
                             // If recompression was requested but failed, fall back to an exact copy.
@@ -169,17 +175,26 @@ public class OrganizeService extends Service {
                         else failed.incrementAndGet();
                     } else {
                         File temp = rc.compressToTemp(img.readUri(), req.mode, req.quality);
-                        boolean ok = false;
-                        if (temp != null) {
-                            try {
-                                ok = mover.publishRecompressed(
-                                        img, temp, req.mode, srcRel, folder, req.volumeName);
-                            } finally {
-                                temp.delete();
+                        if (lowGain(skipLowGain, temp, img)) {
+                            // Too little saved → leave the photo uncompressed and just move it.
+                            temp.delete();
+                            Mover.Outcome o = mover.move(img, srcRel, folder);
+                            if (o == Mover.Outcome.MOVED) moved.incrementAndGet();
+                            else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
+                            else failed.incrementAndGet();
+                        } else {
+                            boolean ok = false;
+                            if (temp != null) {
+                                try {
+                                    ok = mover.publishRecompressed(
+                                            img, temp, req.mode, srcRel, folder, req.volumeName);
+                                } finally {
+                                    temp.delete();
+                                }
                             }
+                            if (ok) moved.incrementAndGet();
+                            else failed.incrementAndGet();
                         }
-                        if (ok) moved.incrementAndGet();
-                        else failed.incrementAndGet();
                     }
                 } catch (Throwable t) {
                     failed.incrementAndGet();
@@ -217,6 +232,15 @@ public class OrganizeService extends Service {
             if (l != null) l.onDone(moved.get(), skipped.get(), failed.get(), stopped);
         });
         finishService();
+    }
+
+    /**
+     * Skip-low-gain test: true when the compressed {@code temp} saved too little (its size exceeds
+     * {@link SizeEstimator#SKIP_LOW_GAIN_RATIO} of the original), so the original should be kept.
+     */
+    private static boolean lowGain(boolean skipLowGain, File temp, MediaImage img) {
+        return skipLowGain && temp != null && img.size > 0
+                && temp.length() > img.size * SizeEstimator.SKIP_LOW_GAIN_RATIO;
     }
 
     private void publish(int done, int total, String folder,

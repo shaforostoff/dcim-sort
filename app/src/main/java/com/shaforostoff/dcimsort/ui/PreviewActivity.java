@@ -65,6 +65,7 @@ public class PreviewActivity extends Activity {
     private GroupMode groupMode;
     private int quality;
     private boolean skipFav;
+    private boolean skipLowGain;
     private DateRange range;
     private double estimateRatio; // bytes/MP from the plan summary; 0 → fall back to the default
 
@@ -100,6 +101,7 @@ public class PreviewActivity extends Activity {
         groupMode = GroupMode.fromName(getIntent().getStringExtra(Extras.GROUP_MODE), GroupMode.PLACE_MONTH);
         quality = getIntent().getIntExtra(Extras.QUALITY, 80);
         skipFav = getIntent().getBooleanExtra(Extras.SKIP_FAV, false);
+        skipLowGain = getIntent().getBooleanExtra(Extras.SKIP_LOW_GAIN, false);
         long from = getIntent().getLongExtra(Extras.DATE_FROM, Long.MIN_VALUE);
         long to = getIntent().getLongExtra(Extras.DATE_TO, Long.MAX_VALUE);
         range = new DateRange(from, to);
@@ -251,7 +253,7 @@ public class PreviewActivity extends Activity {
         // Reuse the ratio the main screen already calibrated; no re-encoding here.
         double ratio = estimateRatio > 0 ? estimateRatio : SizeEstimator.defaultRatio(mode);
         for (PlanFolder pf : list) {
-            pf.estBytes = SizeEstimator.estimateWithRatio(pf.images, ratio, mode, skipFav);
+            pf.estBytes = SizeEstimator.estimateWithRatio(pf.images, ratio, mode, skipFav, skipLowGain);
         }
     }
 

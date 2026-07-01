@@ -122,6 +122,13 @@
             android:text="@string/skip_favorites" />
 
         <CheckBox
+            android:id="@+id/check_skip_low_gain"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/skip_low_gain" />
+
+        <CheckBox
             android:id="@+id/check_keep_original"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

@@ -16,6 +16,7 @@ public class OrganizeRequest {
     public GroupMode groupMode;
     public int quality;
     public boolean skipFavorites;
+    public boolean skipLowGain;         // true = keep original when compression saves <50% (new size >50%)
     public boolean keepOriginal;        // true = import an organized copy, leave the original intact
     public String sourceRelativePath;   // e.g. "DCIM/Camera/"
     public String sourceDataDir;        // legacy absolute dir

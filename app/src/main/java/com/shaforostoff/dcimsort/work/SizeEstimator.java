@@ -26,6 +26,13 @@ public final class SizeEstimator {
     private static final int SAMPLE_COUNT = 4;
 
     /**
+     * Skip-low-gain threshold: when enabled, an image is kept uncompressed if its compressed size
+     * would exceed this fraction of the original. Shared with {@link OrganizeService} so the plan
+     * estimate matches what the run actually does.
+     */
+    public static final double SKIP_LOW_GAIN_RATIO = 0.5;
+
+    /**
      * Calibration encodes at a reduced resolution: bytes-per-megapixel is roughly
      * resolution-invariant, so a smaller decode/encode gives nearly the same ratio far faster and
      * with much less RAM than the full-resolution output path ({@code Recompressor.MAX_LONG_SIDE}).
@@ -84,9 +91,12 @@ public final class SizeEstimator {
         }
     }
 
-    /** Total estimated bytes for {@code images} using a precomputed ratio. Honors skip-favorites. */
+    /**
+     * Total estimated bytes for {@code images} using a precomputed ratio. Honors skip-favorites and
+     * skip-low-gain (keep the original when the estimate exceeds {@link #SKIP_LOW_GAIN_RATIO}).
+     */
     public static long estimateWithRatio(List<MediaImage> images, double ratio,
-                                         CompressMode mode, boolean skipFav) {
+                                         CompressMode mode, boolean skipFav, boolean skipLowGain) {
         if (!mode.recompresses()) {
             long sum = 0;
             for (MediaImage m : images) sum += m.size;
@@ -101,6 +111,8 @@ public final class SizeEstimator {
             double mp = m.megapixels();
             long e = mp > 0 ? (long) (ratio * mp) : m.size;
             if (e > m.size && m.size > 0) e = m.size;
+            // skip-low-gain: too little saved → keep the original instead of compressing.
+            if (skipLowGain && m.size > 0 && e > m.size * SKIP_LOW_GAIN_RATIO) e = m.size;
             est += e;
         }
         return est;
@@ -108,14 +120,15 @@ public final class SizeEstimator {
 
     /** Convenience: calibrate then estimate over the same image set. */
     public static long estimateTotal(List<MediaImage> images, CompressMode mode, int quality,
-                                     boolean skipFav, Recompressor rc, Cancel cancel) {
+                                     boolean skipFav, boolean skipLowGain, Recompressor rc,
+                                     Cancel cancel) {
         if (!mode.recompresses()) {
             long sum = 0;
             for (MediaImage m : images) sum += m.size;
             return sum;
         }
         double ratio = calibrateRatio(images, mode, quality, rc, cancel);
-        return estimateWithRatio(images, ratio, mode, skipFav);
+        return estimateWithRatio(images, ratio, mode, skipFav, skipLowGain);
     }
 
     public static double defaultRatio(CompressMode mode) {

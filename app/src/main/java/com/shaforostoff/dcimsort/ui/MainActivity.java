@@ -73,7 +73,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private RadioButton radioGroupNone, radioGroupPlaceMonth, radioGroupPlaceDay;
     private LinearLayout qualityGroup, progressGroup, dateRangeGroup;
     private SeekBar seekQuality;
-    private CheckBox checkSkipFav, checkKeepOriginal;
+    private CheckBox checkSkipFav, checkSkipLowGain, checkKeepOriginal;
     private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnFiles, btnDateFrom, btnDateTo;
     private ProgressBar progressBar;
 
@@ -107,6 +107,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private GroupMode pendingGroupMode;
     private int pendingQuality;
     private boolean pendingSkipFav;
+    private boolean pendingSkipLowGain;
     private String pendingRel, pendingDir;
     private List<ConsentStep> consentQueue;
     private int consentIndex;
@@ -166,6 +167,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         txtQuality = findViewById(R.id.txt_quality);
         seekQuality = findViewById(R.id.seek_quality);
         checkSkipFav = findViewById(R.id.check_skip_fav);
+        checkSkipLowGain = findViewById(R.id.check_skip_low_gain);
         checkKeepOriginal = findViewById(R.id.check_keep_original);
         radioGroupMode = findViewById(R.id.radio_groupmode);
         radioGroupNone = findViewById(R.id.radio_groupnone);
@@ -224,6 +226,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             if (Sdk.atLeastR()) {
                 checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
             }
+            checkSkipLowGain.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
             if (mode.recompresses()) {
                 int q = settings.getQuality(mode);
                 seekQuality.setProgress(q);
@@ -245,6 +248,11 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
         checkSkipFav.setOnCheckedChangeListener((b, checked) -> {
             settings.setSkipFavorites(checked);
+            recomputeSummary();
+        });
+
+        checkSkipLowGain.setOnCheckedChangeListener((b, checked) -> {
+            settings.setSkipLowGain(checked);
             recomputeSummary();
         });
 
@@ -289,10 +297,12 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (Sdk.atLeastR()) {
             checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
         }
+        checkSkipLowGain.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
         int q = settings.getQuality(mode);
         seekQuality.setProgress(q);
         txtQuality.setText(getString(R.string.quality_label, q));
         checkSkipFav.setChecked(settings.getSkipFavorites());
+        checkSkipLowGain.setChecked(settings.getSkipLowGain());
         switch (settings.getGroupMode()) {
             case NONE: radioGroupNone.setChecked(true); break;
             case PLACE_DAY: radioGroupPlaceDay.setChecked(true); break;
@@ -582,6 +592,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         final CompressMode mode = currentMode();
         final int quality = seekQuality.getProgress();
         final boolean skipFav = checkSkipFav.isChecked() && Sdk.atLeastR();
+        final boolean skipLowGain = checkSkipLowGain.isChecked();
         final int gen = ++summaryGen;
 
         if (count == 0) {
@@ -616,7 +627,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 if (gen != summaryGen) return; // stale: don't cache a ratio for a superseded image set
                 ratioCache.put(cacheKey, ratio);
             }
-            long est = SizeEstimator.estimateWithRatio(inRange, ratio, mode, skipFav);
+            long est = SizeEstimator.estimateWithRatio(inRange, ratio, mode, skipFav, skipLowGain);
             if (gen != summaryGen) return;
             lastEstimateRatio = ratio; // reused by Preview instead of re-encoding samples
             main.post(() -> {
@@ -652,6 +663,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         i.putExtra(Extras.GROUP_MODE, currentGroupMode().name());
         i.putExtra(Extras.QUALITY, seekQuality.getProgress());
         i.putExtra(Extras.SKIP_FAV, checkSkipFav.isChecked() && Sdk.atLeastR());
+        i.putExtra(Extras.SKIP_LOW_GAIN, checkSkipLowGain.isChecked());
         i.putExtra(Extras.DATE_FROM, rangeFrom);
         i.putExtra(Extras.DATE_TO, rangeTo);
     }
@@ -678,11 +690,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         }
         setBusy(true);
         onImagesGathered(imgs, currentMode(), currentGroupMode(), seekQuality.getProgress(),
-                checkSkipFav.isChecked() && Sdk.atLeastR(), relPath, dataDir);
+                checkSkipFav.isChecked() && Sdk.atLeastR(), checkSkipLowGain.isChecked(),
+                relPath, dataDir);
     }
 
     private void onImagesGathered(List<MediaImage> imgs, CompressMode mode, GroupMode groupMode,
-                                  int quality, boolean skipFav, String rel, String dir) {
+                                  int quality, boolean skipFav, boolean skipLowGain,
+                                  String rel, String dir) {
         if (imgs.isEmpty()) {
             setBusy(false);
             toast(R.string.no_photos);
@@ -693,6 +707,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         pendingGroupMode = groupMode;
         pendingQuality = quality;
         pendingSkipFav = skipFav;
+        pendingSkipLowGain = skipLowGain;
         pendingRel = rel;
         pendingDir = dir;
         pendingKeepOriginal = checkKeepOriginal.isChecked();
@@ -751,6 +766,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         req.groupMode = pendingGroupMode;
         req.quality = pendingQuality;
         req.skipFavorites = pendingSkipFav;
+        req.skipLowGain = pendingSkipLowGain;
         req.keepOriginal = pendingKeepOriginal;
         req.sourceRelativePath = pendingRel;
         req.sourceDataDir = pendingDir;
