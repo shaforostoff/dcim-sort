@@ -140,14 +140,29 @@ public class OrganizeService extends Service {
                     currentFolder = folder;
                     String srcRel = req.sourceRelativePath != null
                             ? req.sourceRelativePath : img.relativePath;
-                    boolean isMove = !req.mode.recompresses() || (req.skipFavorites && img.favorite);
-                    if (isMove) {
+                    boolean recompress = req.mode.recompresses() && !(req.skipFavorites && img.favorite);
+                    // Copy (keep original) when the user asked, or when the source isn't movable
+                    // in place (e.g. a Google Photos cloud pick with no MediaStore row).
+                    boolean copy = req.keepOriginal || !img.isMovable();
+                    if (copy) {
+                        File temp = recompress
+                                ? rc.compressToTemp(img.readUri(), req.mode, req.quality) : null;
+                        boolean ok;
+                        try {
+                            // If recompression was requested but failed, fall back to an exact copy.
+                            ok = mover.importCopy(img, temp, req.mode, srcRel, folder, req.volumeName);
+                        } finally {
+                            if (temp != null) temp.delete();
+                        }
+                        if (ok) moved.incrementAndGet();
+                        else failed.incrementAndGet();
+                    } else if (!recompress) {
                         Mover.Outcome o = mover.move(img, srcRel, folder);
                         if (o == Mover.Outcome.MOVED) moved.incrementAndGet();
                         else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
                         else failed.incrementAndGet();
                     } else {
-                        File temp = rc.compressToTemp(img.contentUri(), req.mode, req.quality);
+                        File temp = rc.compressToTemp(img.readUri(), req.mode, req.quality);
                         boolean ok = false;
                         if (temp != null) {
                             try {

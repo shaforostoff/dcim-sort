@@ -280,6 +280,90 @@ public class Mover {
         }
     }
 
+    // ---- Import a copy (keep original) -------------------------------------
+
+    /**
+     * Writes an organized <em>copy</em> into {@code folder} and leaves the original untouched.
+     * When {@code recompressedTemp} is non-null those (already recompressed) bytes are written;
+     * otherwise the original bytes are streamed from {@code img.readUri()} — which may be a photo
+     * picker / cloud URI with no MediaStore row. Used for "Keep original" and for any pick that
+     * isn't movable in place.
+     */
+    public boolean importCopy(MediaImage img, File recompressedTemp, CompressMode mode,
+                              String sourceRel, String folder, String volumeName) {
+        if (folder == null) return false;
+        boolean recompress = recompressedTemp != null;
+        String newRel = childRelativePath(sourceRel, folder);
+        // MediaStore insert into images/media only accepts DCIM/ or Pictures/ as the top-level dir.
+        if (!newRel.startsWith("DCIM/") && !newRel.startsWith("Pictures/")) {
+            newRel = "DCIM/Camera/" + folder + "/";
+        }
+        String mime = recompress ? Recompressor.mimeFor(mode)
+                : (img.mimeType != null ? img.mimeType : "image/jpeg");
+        String ext = recompress ? Recompressor.extensionFor(mode) : extensionFromName(img.displayName);
+        String newName = baseName(img.displayName) + ext;
+
+        ContentValues cv = new ContentValues();
+        cv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
+        cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+        cv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
+        cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+        if (img.favorite && Sdk.atLeastR()) cv.put(MediaStore.MediaColumns.IS_FAVORITE, 1);
+        if (img.description != null) cv.put(MediaStore.Images.ImageColumns.DESCRIPTION, img.description);
+
+        Uri insertUri = IMAGES;
+        if (Sdk.atLeastQ() && volumeName != null && !"external".equals(volumeName)) {
+            try { insertUri = MediaStore.Images.Media.getContentUri(volumeName); }
+            catch (Exception ignore) {}
+        }
+        Uri newUri;
+        try {
+            newUri = resolver().insert(insertUri, cv);
+        } catch (Exception e) {
+            Log.d(TAG, "CPY insert threw: " + e);
+            return false;
+        }
+        if (newUri == null) { Log.d(TAG, "CPY insert returned null"); return false; }
+        try {
+            try (OutputStream os = resolver().openOutputStream(newUri)) {
+                if (os == null) throw new IOException("null output stream");
+                if (recompress) writeFileTo(recompressedTemp, os);
+                else copyFromUri(img.readUri(), os);
+            }
+            ContentValues done = new ContentValues();
+            done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            resolver().update(newUri, done, null, null);
+            if (!verify(newUri)) {
+                Log.d(TAG, "CPY verify FAILED newUri=" + newUri);
+                safeDelete(newUri);
+                return false;
+            }
+            return true; // original deliberately left intact
+        } catch (Exception e) {
+            Log.d(TAG, "CPY write failed: " + e);
+            safeDelete(newUri);
+            return false;
+        }
+    }
+
+    private void copyFromUri(Uri uri, OutputStream out) throws IOException {
+        try (java.io.InputStream in = resolver().openInputStream(uri)) {
+            if (in == null) throw new IOException("null input stream " + uri);
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            out.flush();
+        }
+    }
+
+    private static String extensionFromName(String name) {
+        if (name != null) {
+            int dot = name.lastIndexOf('.');
+            if (dot > 0 && dot < name.length() - 1) return name.substring(dot);
+        }
+        return ".jpg";
+    }
+
     private boolean publishLegacy(MediaImage img, File temp, CompressMode mode, String folder) {
         if (img.dataPath == null) return false;
         File srcFile = new File(img.dataPath);

@@ -22,7 +22,7 @@ public class ThumbnailLoader {
     private final Context ctx;
     private final ExecutorService pool;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final LruCache<Long, Bitmap> cache;
+    private final LruCache<String, Bitmap> cache;
     private final int size;
 
     public ThumbnailLoader(Context ctx, int sizePx) {
@@ -30,16 +30,18 @@ public class ThumbnailLoader {
         this.size = sizePx;
         this.pool = Executors.newFixedThreadPool(3, ThreadPlanner.backgroundFactory("thumb"));
         int maxKb = (int) (Runtime.getRuntime().maxMemory() / 1024 / 8);
-        this.cache = new LruCache<Long, Bitmap>(Math.max(4096, maxKb)) {
-            @Override protected int sizeOf(Long key, Bitmap value) {
+        this.cache = new LruCache<String, Bitmap>(Math.max(4096, maxKb)) {
+            @Override protected int sizeOf(String key, Bitmap value) {
                 return value.getByteCount() / 1024;
             }
         };
     }
 
     public void load(final MediaImage img, final ImageView iv) {
-        iv.setTag(img.id);
-        Bitmap cached = cache.get(img.id);
+        // Key by img.key(), not id: cloud picks all share id = -1 and would otherwise collide.
+        final String key = img.key();
+        iv.setTag(key);
+        Bitmap cached = cache.get(key);
         if (cached != null) {
             iv.setImageBitmap(cached);
             return;
@@ -47,10 +49,10 @@ public class ThumbnailLoader {
         iv.setImageBitmap(null);
         pool.execute(() -> {
             final Bitmap b = decode(img);
-            if (b != null) cache.put(img.id, b);
+            if (b != null) cache.put(key, b);
             main.post(() -> {
                 Object tag = iv.getTag();
-                if (tag != null && ((Long) tag) == img.id && b != null) {
+                if (key.equals(tag) && b != null) {
                     iv.setImageBitmap(b);
                 }
             });
@@ -58,10 +60,11 @@ public class ThumbnailLoader {
     }
 
     private Bitmap decode(MediaImage img) {
+        // readUri(): the MediaStore row for normal images, or the picker source URI for cloud picks.
         if (Sdk.atLeastQ()) {
             try {
                 return ctx.getContentResolver().loadThumbnail(
-                        img.contentUri(), new Size(size, size), null);
+                        img.readUri(), new Size(size, size), null);
             } catch (Exception ignore) {
                 // fall through to manual decode
             }
@@ -69,7 +72,7 @@ public class ThumbnailLoader {
         try {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
-            try (InputStream in = ctx.getContentResolver().openInputStream(img.contentUri())) {
+            try (InputStream in = ctx.getContentResolver().openInputStream(img.readUri())) {
                 BitmapFactory.decodeStream(in, null, bounds);
             }
             int sample = 1;
@@ -77,7 +80,7 @@ public class ThumbnailLoader {
             while (longest / sample > size * 2) sample *= 2;
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = sample;
-            try (InputStream in = ctx.getContentResolver().openInputStream(img.contentUri())) {
+            try (InputStream in = ctx.getContentResolver().openInputStream(img.readUri())) {
                 return BitmapFactory.decodeStream(in, null, opts);
             }
         } catch (Exception e) {

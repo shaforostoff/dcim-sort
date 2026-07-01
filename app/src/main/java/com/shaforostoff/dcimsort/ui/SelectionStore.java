@@ -10,29 +10,29 @@ import java.util.Set;
 /** In-RAM set of image IDs the user has excluded from processing in the current Preview session. */
 public class SelectionStore {
 
-    private static final Set<Long> deselected = new HashSet<>();
+    private static final Set<String> deselected = new HashSet<>();
 
     public static void clear() { deselected.clear(); }
 
-    public static boolean isSelected(long id) { return !deselected.contains(id); }
+    public static boolean isSelected(String key) { return !deselected.contains(key); }
 
-    public static void toggle(long id) {
-        if (!deselected.remove(id)) deselected.add(id);
+    public static void toggle(String key) {
+        if (!deselected.remove(key)) deselected.add(key);
     }
 
     public static boolean allSelected(List<MediaImage> images) {
         for (MediaImage img : images) {
-            if (deselected.contains(img.id)) return false;
+            if (deselected.contains(img.key())) return false;
         }
         return true;
     }
 
     public static void selectAll(List<MediaImage> images) {
-        for (MediaImage img : images) deselected.remove(img.id);
+        for (MediaImage img : images) deselected.remove(img.key());
     }
 
     public static void deselectAll(List<MediaImage> images) {
-        for (MediaImage img : images) deselected.add(img.id);
+        for (MediaImage img : images) deselected.add(img.key());
     }
 
     /** Returns a filtered copy, or the same list instance if nothing is deselected. */
@@ -40,7 +40,7 @@ public class SelectionStore {
         if (deselected.isEmpty()) return images;
         List<MediaImage> out = new ArrayList<>();
         for (MediaImage img : images) {
-            if (!deselected.contains(img.id)) out.add(img);
+            if (!deselected.contains(img.key())) out.add(img);
         }
         return out;
     }

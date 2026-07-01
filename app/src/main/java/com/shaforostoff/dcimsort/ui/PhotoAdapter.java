@@ -36,7 +36,7 @@ public class PhotoAdapter extends BaseAdapter {
         }
         MediaImage img = images.get(position);
         loader.load(img, iv);
-        iv.setAlpha(SelectionStore.isSelected(img.id) ? 1f : 0.35f);
+        iv.setAlpha(SelectionStore.isSelected(img.key()) ? 1f : 0.35f);
         return iv;
     }
 }

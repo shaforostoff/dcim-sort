@@ -70,7 +70,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private RadioButton radioGroupNone, radioGroupPlaceMonth, radioGroupPlaceDay;
     private LinearLayout qualityGroup, progressGroup, dateRangeGroup;
     private SeekBar seekQuality;
-    private CheckBox checkSkipFav;
+    private CheckBox checkSkipFav, checkKeepOriginal;
     private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnFiles, btnDateFrom, btnDateTo;
     private ProgressBar progressBar;
 
@@ -80,7 +80,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
     // Files mode: images picked individually via the system photo picker (no source folder).
     private boolean filesMode;
-    private long[] pickedIds;
+    private ArrayList<String> pickedUris; // raw picked URIs (resolved lazily by repo)
+
+    // Keep-original: copy into the organized folder instead of moving. Forced on (and locked)
+    // when any selected photo has no on-device MediaStore row (e.g. Google Photos cloud pick).
+    private boolean userKeepOriginal;
+    private boolean keepOriginalForced;
+    private boolean pendingKeepOriginal;
 
     // Cached folder contents (newest-first) + date-range scoping
     private List<MediaImage> allImages;
@@ -137,6 +143,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         txtQuality = findViewById(R.id.txt_quality);
         seekQuality = findViewById(R.id.seek_quality);
         checkSkipFav = findViewById(R.id.check_skip_fav);
+        checkKeepOriginal = findViewById(R.id.check_keep_original);
         radioGroupMode = findViewById(R.id.radio_groupmode);
         radioGroupNone = findViewById(R.id.radio_groupnone);
         radioGroupPlaceMonth = findViewById(R.id.radio_groupplacemonth);
@@ -203,6 +210,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         checkSkipFav.setOnCheckedChangeListener((b, checked) -> {
             settings.setSkipFavorites(checked);
             recomputeSummary();
+        });
+
+        checkKeepOriginal.setOnCheckedChangeListener((b, checked) -> {
+            if (!keepOriginalForced) userKeepOriginal = checked;
         });
 
         radioGroupMode.setOnCheckedChangeListener((group, checkedId) -> {
@@ -297,11 +308,24 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
     private void applyFolder() {
         filesMode = false;
-        pickedIds = null;
+        pickedUris = null;
+        keepOriginalForced = false; // folder images are always movable in place
+        applyKeepOriginalState();
         dateRangeGroup.setVisibility(View.VISIBLE);
         txtFolder.setText(displayName != null ? displayName
                 : (relPath != null ? relPath : getString(R.string.no_folder_selected)));
         loadFolder();
+    }
+
+    /** Reflects keep-original state: locked-on when forced, else the user's own choice. */
+    private void applyKeepOriginalState() {
+        if (keepOriginalForced) {
+            checkKeepOriginal.setChecked(true);
+            checkKeepOriginal.setEnabled(false);
+        } else {
+            checkKeepOriginal.setEnabled(true);
+            checkKeepOriginal.setChecked(userKeepOriginal);
+        }
     }
 
     /** Gathers the folder's images once, then derives stats, the date span, and the plan summary. */
@@ -346,6 +370,9 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // ---- File picker (individual files) ------------------------------------
 
     private void startPickFiles() {
+        // Modern photo picker. Local picks resolve to a MediaStore row (movable in place); picks
+        // from a cloud provider (e.g. Google Photos) come back as opaque URIs with no MediaStore
+        // row — those are handled as copy-only imports, forcing "Keep original" on.
         Intent intent;
         if (Sdk.atLeastT()) {
             intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
@@ -353,23 +380,19 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         } else {
             intent = new Intent(Intent.ACTION_GET_CONTENT);
             intent.setType("image/*");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         }
         startActivityForResult(intent, REQ_PICK_FILES);
     }
 
     private void loadPickedFiles(List<Uri> uris) {
-        List<Long> ids = new ArrayList<>();
-        for (Uri u : uris) {
-            try { ids.add(Long.parseLong(u.getLastPathSegment())); }
-            catch (NumberFormatException ignore) {}
-        }
-        if (ids.isEmpty()) return;
+        if (uris.isEmpty()) return;
         relPath = null; dataDir = null; displayName = null; volumeName = null; bucketId = -1;
         allImages = null;
         filesMode = true;
-        pickedIds = new long[ids.size()];
-        for (int i = 0; i < ids.size(); i++) pickedIds[i] = ids.get(i);
+        pickedUris = new ArrayList<>();
+        for (Uri u : uris) pickedUris.add(u.toString());
         // No source folder in files mode; date range is implied by the picked set.
         txtFolder.setText("");
         dateRangeGroup.setVisibility(View.GONE);
@@ -377,11 +400,19 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         rangeFrom = Long.MIN_VALUE;
         rangeTo = Long.MAX_VALUE;
         txtPlan.setText(R.string.counting);
-        final List<Long> fIds = ids;
+        final List<Uri> fUris = uris;
         executor.execute(() -> {
-            final List<MediaImage> imgs = repo.fetchByIds(fIds);
+            final List<MediaImage> imgs = repo.fetchByUris(fUris);
+            boolean anyCloud = false;
+            for (MediaImage m : imgs) if (!m.isMovable()) { anyCloud = true; break; }
+            final boolean forced = anyCloud;
             main.post(() -> {
                 allImages = imgs;
+                // A non-movable pick (no on-device MediaStore row) can only be copied, never moved.
+                keepOriginalForced = forced;
+                applyKeepOriginalState();
+                if (forced) toast(R.string.keep_original_forced);
+                if (imgs.isEmpty()) toast(R.string.no_photos);
                 recomputeSummary();
             });
         });
@@ -548,7 +579,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         i.putExtra(Extras.REL_PATH, relPath);
         i.putExtra(Extras.DATA_DIR, dataDir);
         i.putExtra(Extras.VOLUME_NAME, volumeName);
-        if (filesMode) i.putExtra(Extras.FILE_IDS, pickedIds);
+        if (filesMode) i.putStringArrayListExtra(Extras.FILE_URIS, pickedUris);
         i.putExtra(Extras.DISPLAY, displayName);
         i.putExtra(Extras.MODE, currentMode().name());
         i.putExtra(Extras.GROUP_MODE, currentGroupMode().name());
@@ -597,8 +628,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         pendingSkipFav = skipFav;
         pendingRel = rel;
         pendingDir = dir;
+        pendingKeepOriginal = checkKeepOriginal.isChecked();
 
-        if (Sdk.atLeastR()) {
+        // Copy mode (keep original) only inserts new files we own, so no consent on originals.
+        if (Sdk.atLeastR() && !pendingKeepOriginal) {
             buildConsentQueue(imgs);
             consentIndex = 0;
             processNextConsent();
@@ -615,7 +648,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         // so any later failure loses the photo with nothing to show for it. Mover deletes each
         // original itself, only after its recompressed replacement has been written and verified.
         List<Uri> writeUris = new ArrayList<>();
-        for (MediaImage m : imgs) writeUris.add(m.contentUri());
+        for (MediaImage m : imgs) if (m.isMovable()) writeUris.add(m.contentUri());
         addChunks(CONSENT_WRITE, writeUris);
     }
 
@@ -651,6 +684,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         req.groupMode = pendingGroupMode;
         req.quality = pendingQuality;
         req.skipFavorites = pendingSkipFav;
+        req.keepOriginal = pendingKeepOriginal;
         req.sourceRelativePath = pendingRel;
         req.sourceDataDir = pendingDir;
         req.volumeName = volumeName;

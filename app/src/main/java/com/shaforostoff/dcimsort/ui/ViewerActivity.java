@@ -124,7 +124,7 @@ public class ViewerActivity extends Activity {
         final Recompressor rc = new Recompressor(this, repo);
         final int maxDim = screenMaxDim();
         executor.execute(() -> {
-            final Bitmap bmp = rc.decodeOriented(image.contentUri(), maxDim);
+            final Bitmap bmp = rc.decodeOriented(image.readUri(), maxDim);
             main.post(() -> {
                 if (bmp == null) {
                     finish();
@@ -140,7 +140,7 @@ public class ViewerActivity extends Activity {
         final MediaRepository repo = new MediaRepository(this);
         final Recompressor rc = new Recompressor(this, repo);
         executor.execute(() -> {
-            File temp = rc.compressToTemp(image.contentUri(), mode, quality);
+            File temp = rc.compressToTemp(image.readUri(), mode, quality);
             if (temp == null) return;
             long compSize = temp.length();
             Bitmap bmp = BitmapFactory.decodeFile(temp.getAbsolutePath());

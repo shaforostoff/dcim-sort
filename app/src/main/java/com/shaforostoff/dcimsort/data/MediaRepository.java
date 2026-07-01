@@ -234,7 +234,107 @@ public class MediaRepository {
         }
     }
 
-    // ---- Fetch by ID list --------------------------------------------------
+    // ---- Fetch by picked URIs / ID list ------------------------------------
+
+    /**
+     * Resolves photo-picker / document URIs to on-device MediaStore rows.
+     *
+     * <p>Picker URIs come in two shapes: ones carrying the MediaStore {@code _ID} (photo picker
+     * local items {@code .../photopicker/media/1234}, DocumentsProvider {@code .../document/image:1234}),
+     * and opaque ones with no usable id (Google Photos cloud picker
+     * {@code .../cloudpicker/media/<uuid>}). The first kind is looked up by id; the second is matched
+     * to a local row by display name + size. Cloud-only photos that aren't on the device have no
+     * MediaStore row and are silently dropped — they can't be moved or recompressed anyway.
+     */
+    public List<MediaImage> fetchByUris(List<Uri> uris) {
+        if (uris == null || uris.isEmpty()) return Collections.emptyList();
+        List<Long> ids = new ArrayList<>();
+        List<Uri> cloud = new ArrayList<>();
+        for (Uri u : uris) {
+            long id = idFromUri(u);
+            if (id >= 0) ids.add(id); else cloud.add(u);
+        }
+        List<MediaImage> out = new ArrayList<>(fetchByIds(ids));
+        // Picks with no MediaStore row (Google Photos cloud picker etc.): keep them as
+        // copy-only images carrying their source URI; their bytes are read at organize time.
+        for (Uri u : cloud) {
+            MediaImage m = pickerImage(u);
+            if (m != null) out.add(m);
+        }
+        return out;
+    }
+
+    /** Numeric MediaStore {@code _ID} from a URI's last segment, or -1 if it isn't a plain id. */
+    private static long idFromUri(Uri uri) {
+        if (uri == null) return -1;
+        String seg = uri.getLastPathSegment();
+        if (seg == null) return -1;
+        int colon = seg.lastIndexOf(':'); // DocumentsProvider form "image:1234"
+        if (colon >= 0) seg = seg.substring(colon + 1);
+        if (seg.isEmpty()) return -1;
+        for (int i = 0; i < seg.length(); i++) {
+            if (!Character.isDigit(seg.charAt(i))) return -1; // cloud uuids etc.
+        }
+        try { return Long.parseLong(seg); }
+        catch (NumberFormatException e) { return -1; }
+    }
+
+    /**
+     * Builds a copy-only {@link MediaImage} for a picked URI that has no MediaStore row (id = -1,
+     * sourceUri set). Reads whatever metadata the picker exposes (display name, size, date taken,
+     * dimensions). Output naming prefers a date-based name since cloud picks carry synthetic names.
+     */
+    private MediaImage pickerImage(Uri uri) {
+        String name = null, mime = null;
+        long size = 0, taken = 0;
+        int w = 0, h = 0;
+        try (Cursor c = resolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                name = colString(c, android.provider.OpenableColumns.DISPLAY_NAME);
+                size = colLong(c, android.provider.OpenableColumns.SIZE);
+                mime = colString(c, MediaStore.MediaColumns.MIME_TYPE);
+                taken = colLong(c, MediaStore.MediaColumns.DATE_TAKEN);
+                w = (int) colLong(c, MediaStore.MediaColumns.WIDTH);
+                h = (int) colLong(c, MediaStore.MediaColumns.HEIGHT);
+            }
+        } catch (Exception ignore) {}
+        if (mime == null) {
+            try { mime = resolver().getType(uri); } catch (Exception ignore) {}
+        }
+        if (mime == null) mime = "image/jpeg";
+        // Cloud picks expose an opaque UUID filename; synthesize a clean date-based name instead.
+        String ext = extensionForMime(mime);
+        if (taken > 0) {
+            name = "IMG_" + DATE_NAME_FMT.format(new java.util.Date(taken)) + ext;
+        } else if (TextUtils.isEmpty(name)) {
+            name = "IMG" + ext;
+        }
+        return new MediaImage(-1, name, null, null, taken, size, false, mime, w, h, null, uri);
+    }
+
+    private static final java.text.SimpleDateFormat DATE_NAME_FMT =
+            new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US);
+
+    private static String extensionForMime(String mime) {
+        if (mime == null) return ".jpg";
+        switch (mime) {
+            case "image/png": return ".png";
+            case "image/webp": return ".webp";
+            case "image/heic": case "image/heif": return ".heic";
+            case "image/gif": return ".gif";
+            default: return ".jpg";
+        }
+    }
+
+    private static String colString(Cursor c, String col) {
+        int i = c.getColumnIndex(col);
+        return i >= 0 && !c.isNull(i) ? c.getString(i) : null;
+    }
+
+    private static long colLong(Cursor c, String col) {
+        int i = c.getColumnIndex(col);
+        return i >= 0 && !c.isNull(i) ? c.getLong(i) : 0;
+    }
 
     /** Returns MediaImage objects for the given MediaStore IDs, sorted by DATE_TAKEN DESC. */
     public List<MediaImage> fetchByIds(List<Long> ids) {
@@ -246,6 +346,11 @@ public class MediaRepository {
             args[i] = String.valueOf(ids.get(i));
         }
         String where = MediaStore.Images.Media._ID + " IN (" + TextUtils.join(",", placeholders) + ")";
+        return queryImages(where, args);
+    }
+
+    /** Shared image query: applies {@code where}/{@code args}, sorts newest first, builds rows. */
+    private List<MediaImage> queryImages(String where, String[] args) {
         String sort = MediaStore.Images.Media.DATE_TAKEN + " DESC, "
                 + MediaStore.Images.Media.DATE_ADDED + " DESC";
 

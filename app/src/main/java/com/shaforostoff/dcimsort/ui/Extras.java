@@ -14,7 +14,7 @@ public final class Extras {
     public static final String DATE_FROM = "date_from";
     public static final String DATE_TO = "date_to";
     public static final String RATIO = "ratio"; // bytes-per-megapixel calibrated by the plan summary
-    public static final String FILE_IDS = "file_ids"; // MediaStore IDs for files-mode preview (no folder)
+    public static final String FILE_URIS = "file_uris"; // picked URIs for files-mode preview (no folder)
 
     // FolderPicker result
     public static final String RESULT_BUCKET_ID = "bucket_id";

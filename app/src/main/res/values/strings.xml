@@ -24,6 +24,8 @@
     <string name="compressmode_heic">HEIC</string>
     <string name="quality_label">Quality: %1$d</string>
     <string name="skip_favorites">Do not compress photos marked as favorite</string>
+    <string name="keep_original">Keep original (copy instead of move)</string>
+    <string name="keep_original_forced">Some selected photos aren\'t on this device — originals will be kept</string>
 
     <!-- Date range -->
     <string name="date_range_label">Date range</string>

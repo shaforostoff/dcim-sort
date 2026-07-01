@@ -17,10 +17,22 @@ public class MediaImage {
     public final int width;
     public final int height;
     public final String description;   // MediaStore DESCRIPTION; null if unset
+    /**
+     * Source URI for reading bytes when this image has no MediaStore row (id < 0) — e.g. a photo
+     * picker / Google Photos cloud pick. Null for normal MediaStore-backed images.
+     */
+    public final Uri sourceUri;
 
     public MediaImage(long id, String displayName, String relativePath, String dataPath,
                       long dateTakenMillis, long size, boolean favorite, String mimeType,
                       int width, int height, String description) {
+        this(id, displayName, relativePath, dataPath, dateTakenMillis, size, favorite, mimeType,
+                width, height, description, null);
+    }
+
+    public MediaImage(long id, String displayName, String relativePath, String dataPath,
+                      long dateTakenMillis, long size, boolean favorite, String mimeType,
+                      int width, int height, String description, Uri sourceUri) {
         this.id = id;
         this.displayName = displayName;
         this.relativePath = relativePath;
@@ -32,10 +44,29 @@ public class MediaImage {
         this.width = width;
         this.height = height;
         this.description = description;
+        this.sourceUri = sourceUri;
     }
 
     public Uri contentUri() {
         return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id);
+    }
+
+    /** True when this image has a real MediaStore row that can be relocated/deleted in place. */
+    public boolean isMovable() {
+        return id >= 0 && sourceUri == null;
+    }
+
+    /** URI to read the original bytes from: the picker source if present, else the MediaStore row. */
+    public Uri readUri() {
+        return sourceUri != null ? sourceUri : contentUri();
+    }
+
+    /**
+     * Stable identity for selection tracking. MediaStore rows key by id; cloud picks (id = -1, which
+     * would otherwise all collide) key by their source URI.
+     */
+    public String key() {
+        return id >= 0 ? ("id:" + id) : ("uri:" + sourceUri);
     }
 
     public double megapixels() {

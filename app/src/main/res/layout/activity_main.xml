@@ -107,6 +107,13 @@
             android:layout_marginTop="8dp"
             android:text="@string/skip_favorites" />
 
+        <CheckBox
+            android:id="@+id/check_keep_original"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/keep_original" />
+
         <!-- Group into folders -->
         <TextView
             android:layout_width="match_parent"

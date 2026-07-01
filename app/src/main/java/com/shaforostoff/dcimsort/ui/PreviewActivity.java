@@ -53,7 +53,7 @@ public class PreviewActivity extends Activity {
     private ThumbnailLoader thumbLoader;
 
     private String relPath, dataDir, volumeName;
-    private long[] fileIds; // files mode: explicit MediaStore IDs instead of a folder query
+    private java.util.ArrayList<String> fileUris; // files mode: picked URIs instead of a folder query
     private CompressMode mode;
     private GroupMode groupMode;
     private int quality;
@@ -85,7 +85,7 @@ public class PreviewActivity extends Activity {
         relPath = getIntent().getStringExtra(Extras.REL_PATH);
         dataDir = getIntent().getStringExtra(Extras.DATA_DIR);
         volumeName = getIntent().getStringExtra(Extras.VOLUME_NAME);
-        fileIds = getIntent().getLongArrayExtra(Extras.FILE_IDS);
+        fileUris = getIntent().getStringArrayListExtra(Extras.FILE_URIS);
         mode = CompressMode.fromName(getIntent().getStringExtra(Extras.MODE), CompressMode.NONE);
         groupMode = GroupMode.fromName(getIntent().getStringExtra(Extras.GROUP_MODE), GroupMode.PLACE_MONTH);
         quality = getIntent().getIntExtra(Extras.QUALITY, 80);
@@ -101,7 +101,7 @@ public class PreviewActivity extends Activity {
         folderList.setOnItemClickListener((p, v, pos, id) -> openFolder(folders.get(pos)));
         photoGrid.setOnItemClickListener((p, v, pos, id) -> openViewer(openFolderRef.images.get(pos)));
         photoGrid.setOnItemLongClickListener((p, v, pos, id) -> {
-            SelectionStore.toggle(openFolderRef.images.get(pos).id);
+            SelectionStore.toggle(openFolderRef.images.get(pos).key());
             refreshGrid();
             return true;
         });
@@ -148,10 +148,10 @@ public class PreviewActivity extends Activity {
                 pf.currentBytes += img.size;
                 return true;
             };
-            if (fileIds != null && fileIds.length > 0) {
-                List<Long> ids = new ArrayList<>(fileIds.length);
-                for (long id : fileIds) ids.add(id);
-                for (MediaImage img : repo.fetchByIds(ids)) {
+            if (fileUris != null && !fileUris.isEmpty()) {
+                List<android.net.Uri> uris = new ArrayList<>(fileUris.size());
+                for (String s : fileUris) uris.add(android.net.Uri.parse(s));
+                for (MediaImage img : repo.fetchByUris(uris)) {
                     if (!group.onImage(img)) break;
                 }
             } else {
