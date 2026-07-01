@@ -10,14 +10,15 @@ import android.view.WindowInsets;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.Bucket;
 import com.shaforostoff.dcimsort.data.MediaRepository;
+import com.shaforostoff.dcimsort.data.SettingsStore;
 import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,6 +31,9 @@ public class FolderPickerActivity extends Activity {
 
     private ListView list;
     private TextView empty;
+    private TextView sortToggle;
+    private SettingsStore settings;
+    private ArrayAdapter<Bucket> adapter;
     private List<Bucket> buckets;
 
     @Override
@@ -37,9 +41,18 @@ public class FolderPickerActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_folder_picker);
         applySystemBarsInsets();
+        settings = new SettingsStore(this);
         list = findViewById(R.id.list);
         empty = findViewById(R.id.empty);
+        sortToggle = findViewById(R.id.sort_toggle);
         list.setEmptyView(empty);
+
+        updateSortToggleLabel();
+        sortToggle.setOnClickListener(v -> {
+            settings.setFolderSortAlpha(!settings.isFolderSortAlpha());
+            updateSortToggleLabel();
+            applySortToAdapter();
+        });
 
         list.setOnItemClickListener((parent, view, position, id) -> {
             if (buckets == null || position >= buckets.size()) return;
@@ -76,34 +89,60 @@ public class FolderPickerActivity extends Activity {
             for (Bucket b : all) {
                 if (isImageDirectory(b)) filtered.add(b);
             }
-            final List<Bucket> result = filtered;
             main.post(() -> {
-                buckets = result;
-                if (result.isEmpty()) {
+                buckets = filtered;
+                if (filtered.isEmpty()) {
                     empty.setText(R.string.no_photos);
                     return;
                 }
-                list.setAdapter(new ArrayAdapter<Bucket>(
-                        this, android.R.layout.simple_list_item_2, android.R.id.text1, result) {
-                    @Override
-                    public View getView(int position, View convertView, android.view.ViewGroup parent) {
-                        View v = super.getView(position, convertView, parent);
-                        Bucket b = result.get(position);
-                        TextView t1 = v.findViewById(android.R.id.text1);
-                        TextView t2 = v.findViewById(android.R.id.text2);
-                        String label = b.displayName;
-                        if (b.volumeName != null && !"external_primary".equals(b.volumeName)) {
-                            label = label + " (SD)";
-                        }
-                        t1.setText(label);
-                        String path = b.relativePath != null ? b.relativePath
-                                : (b.dataDir != null ? b.dataDir : "");
-                        t2.setText(getString(R.string.photos_count_only, b.count) + "  ·  " + path);
-                        return v;
-                    }
-                });
+                applySortToAdapter();
             });
         });
+    }
+
+    private void applySortToAdapter() {
+        if (buckets == null || buckets.isEmpty()) return;
+        if (settings.isFolderSortAlpha()) {
+            Collections.sort(buckets, (a, b) -> alphaKey(a).compareToIgnoreCase(alphaKey(b)));
+        } else {
+            Collections.sort(buckets, (a, b) -> Integer.compare(b.count, a.count));
+        }
+        if (adapter == null) {
+            adapter = new ArrayAdapter<Bucket>(
+                    this, android.R.layout.simple_list_item_2, android.R.id.text1, buckets) {
+                @Override
+                public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                    View v = super.getView(position, convertView, parent);
+                    Bucket b = getItem(position);
+                    TextView t1 = v.findViewById(android.R.id.text1);
+                    TextView t2 = v.findViewById(android.R.id.text2);
+                    String label = b.displayName;
+                    if (b.volumeName != null && !"external_primary".equals(b.volumeName)) {
+                        label = label + " (SD)";
+                    }
+                    t1.setText(label);
+                    String path = b.relativePath != null ? b.relativePath
+                            : (b.dataDir != null ? b.dataDir : "");
+                    t2.setText(getString(R.string.photos_count_only, b.count) + "  ·  " + path);
+                    return v;
+                }
+            };
+            list.setAdapter(adapter);
+        } else {
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    private void updateSortToggleLabel() {
+        sortToggle.setText(settings.isFolderSortAlpha()
+                ? R.string.sort_by_name : R.string.sort_by_count);
+    }
+
+    private static String alphaKey(Bucket b) {
+        boolean isSd = b.volumeName != null && !"external_primary".equals(b.volumeName);
+        String path = b.relativePath != null ? b.relativePath
+                : (b.dataDir != null ? b.dataDir : b.displayName);
+        return (isSd ? "1" : "0") + path;
     }
 
     private void applySystemBarsInsets() {

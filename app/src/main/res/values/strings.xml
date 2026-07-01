@@ -71,6 +71,10 @@
     <string name="favorite_no_compress">Favorite — won\'t compress</string>
     <string name="compressing">Compressing…</string>
 
+    <!-- Folder sort -->
+    <string name="sort_by_count">Count</string>
+    <string name="sort_by_name">A–Z</string>
+
     <!-- Misc -->
     <string name="unknown_place">Unknown</string>
     <string name="today">Today</string>

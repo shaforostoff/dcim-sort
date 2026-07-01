@@ -18,6 +18,7 @@ public class SettingsStore {
     private static final String K_GROUP_MODE = "group_mode";
     private static final String K_QUALITY = "quality";
     private static final String K_SKIP_FAV = "skip_favorites";
+    private static final String K_FOLDER_SORT_ALPHA = "folder_sort_alpha";
 
     private final SharedPreferences prefs;
 
@@ -79,5 +80,11 @@ public class SettingsStore {
 
     public void setSkipFavorites(boolean skip) {
         prefs.edit().putBoolean(K_SKIP_FAV, skip).apply();
+    }
+
+    public boolean isFolderSortAlpha() { return prefs.getBoolean(K_FOLDER_SORT_ALPHA, false); }
+
+    public void setFolderSortAlpha(boolean alpha) {
+        prefs.edit().putBoolean(K_FOLDER_SORT_ALPHA, alpha).apply();
     }
 }
