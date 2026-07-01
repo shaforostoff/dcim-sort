@@ -140,15 +140,19 @@ public class Recompressor {
      * @return the temp file, or null on failure.
      */
     public File compressToTemp(Uri source, CompressMode mode, int quality) {
+        return compressToTemp(source, mode, quality, MAX_LONG_SIDE);
+    }
+
+    public File compressToTemp(Uri source, CompressMode mode, int quality, int maxLongSide) {
         // Full flavor: AVIF goes through libavif (HDR-preserving, EXIF embedded during encode).
         if (mode == CompressMode.AVIF && NativeCodecs.avifAvailable()) {
-            return compressAvifNative(source, quality);
+            return compressAvifNative(source, quality, maxLongSide);
         }
         // Full flavor: JPEG goes through jpegli; UltraHDR gain map is preserved when present.
         if (mode == CompressMode.JPEG && NativeCodecs.jpegliAvailable()) {
-            return compressJpegNative(source, quality);
+            return compressJpegNative(source, quality, maxLongSide);
         }
-        Bitmap bmp = decodeOriented(source, MAX_LONG_SIDE);
+        Bitmap bmp = decodeOriented(source, maxLongSide);
         if (bmp == null) return null;
         File out = null;
         try {
@@ -173,8 +177,8 @@ public class Recompressor {
      * hands the base bitmap, gain map and a raw EXIF/TIFF block to libavif, which embeds HDR and
      * metadata during encode — so no ISO-BMFF EXIF surgery is needed afterward.
      */
-    private File compressAvifNative(Uri source, int quality) {
-        Bitmap base = decodeOriented(source, MAX_LONG_SIDE);
+    private File compressAvifNative(Uri source, int quality, int maxLongSide) {
+        Bitmap base = decodeOriented(source, maxLongSide);
         if (base == null) return null;
         Bitmap gainmapContents = null;
         GainmapMeta meta = null;
@@ -210,8 +214,8 @@ public class Recompressor {
      * MPF offsets are not disturbed by post-encode ExifInterface writes. Falls back to plain JPEG
      * with normal EXIF re-injection when no gain map is present.
      */
-    private File compressJpegNative(Uri source, int quality) {
-        Bitmap base = decodeOriented(source, MAX_LONG_SIDE);
+    private File compressJpegNative(Uri source, int quality, int maxLongSide) {
+        Bitmap base = decodeOriented(source, maxLongSide);
         if (base == null) return null;
         File out = null;
         try {
@@ -271,7 +275,11 @@ public class Recompressor {
 
     /** Size in bytes the image would occupy after compression, or -1 on failure. */
     public long encodedSize(Uri source, CompressMode mode, int quality) {
-        File f = compressToTemp(source, mode, quality);
+        return encodedSize(source, mode, quality, MAX_LONG_SIDE);
+    }
+
+    public long encodedSize(Uri source, CompressMode mode, int quality, int maxLongSide) {
+        File f = compressToTemp(source, mode, quality, maxLongSide);
         if (f == null) return -1;
         long len = f.length();
         f.delete();
