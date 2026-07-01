@@ -83,4 +83,7 @@
     <string name="no_photos">No photos in this folder.</string>
     <string name="select_all">Select all</string>
     <string name="select_none">Select none</string>
+    <string name="btn_info">Licenses</string>
+    <string name="info_dialog_title">About</string>
+    <string name="close">Close</string>
 </resources>

@@ -1,6 +1,7 @@
 package com.shaforostoff.dcimsort.ui;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.app.PendingIntent;
 import android.content.ContentResolver;
@@ -11,6 +12,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.widget.ScrollView;
 import android.provider.MediaStore;
 import android.view.View;
 import android.view.WindowInsets;
@@ -40,6 +42,10 @@ import com.shaforostoff.dcimsort.work.OrganizeService;
 import com.shaforostoff.dcimsort.work.Recompressor;
 import com.shaforostoff.dcimsort.work.SizeEstimator;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -74,7 +80,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private LinearLayout qualityGroup, progressGroup, dateRangeGroup;
     private SeekBar seekQuality;
     private CheckBox checkSkipFav, checkSkipLowGain, checkKeepOriginal;
-    private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnFiles, btnDateFrom, btnDateTo;
+    private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnFiles, btnDateFrom, btnDateTo, btnInfo;
     private ProgressBar progressBar;
 
     // Current folder
@@ -183,6 +189,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         progressBar = findViewById(R.id.progress_bar);
         txtProgress = findViewById(R.id.txt_progress);
         btnStop = findViewById(R.id.btn_stop);
+        btnInfo = findViewById(R.id.btn_info);
     }
 
     private void setupControls() {
@@ -270,9 +277,39 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         btnPreview.setOnClickListener(v -> openPreview());
         btnOrganize.setOnClickListener(v -> startOrganize());
         btnStop.setOnClickListener(v -> OrganizeService.stop(this));
+        btnInfo.setOnClickListener(v -> showInfoDialog());
 
         setRangeControlsEnabled(false);
         updateDateLabels();
+    }
+
+    private void showInfoDialog() {
+        String text;
+        try (InputStream is = getResources().openRawResource(R.raw.help_text);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            text = sb.toString();
+        } catch (IOException e) {
+            text = "";
+        }
+
+        int padding = (int) (16 * getResources().getDisplayMetrics().density);
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setPadding(padding, padding, padding, padding);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(tv);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.info_dialog_title)
+                .setView(scroll)
+                .setPositiveButton(R.string.close, null)
+                .show();
     }
 
     private void applySavedSettings() {
