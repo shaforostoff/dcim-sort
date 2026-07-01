@@ -19,6 +19,7 @@ public final class Extras {
     public static final String RESULT_REL_PATH = "rel_path";
     public static final String RESULT_DATA_DIR = "data_dir";
     public static final String RESULT_DISPLAY = "display";
+    public static final String VOLUME_NAME = "volume_name"; // "external_primary" or SD UUID
 
     // Viewer
     public static final String FOLDER_NAME = "folder_name";

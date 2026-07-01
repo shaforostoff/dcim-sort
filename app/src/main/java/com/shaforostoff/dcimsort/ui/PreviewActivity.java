@@ -48,7 +48,7 @@ public class PreviewActivity extends Activity {
     private TextView status;
     private ThumbnailLoader thumbLoader;
 
-    private String relPath, dataDir;
+    private String relPath, dataDir, volumeName;
     private CompressMode mode;
     private int quality;
     private boolean skipFav;
@@ -76,6 +76,7 @@ public class PreviewActivity extends Activity {
 
         relPath = getIntent().getStringExtra(Extras.REL_PATH);
         dataDir = getIntent().getStringExtra(Extras.DATA_DIR);
+        volumeName = getIntent().getStringExtra(Extras.VOLUME_NAME);
         mode = CompressMode.fromName(getIntent().getStringExtra(Extras.MODE), CompressMode.NONE);
         quality = getIntent().getIntExtra(Extras.QUALITY, 80);
         skipFav = getIntent().getBooleanExtra(Extras.SKIP_FAV, false);
@@ -105,7 +106,7 @@ public class PreviewActivity extends Activity {
 
         executor.execute(() -> {
             final Map<String, PlanFolder> map = new LinkedHashMap<>();
-            repo.forEachNewestFirst(relPath, dataDir, img -> {
+            repo.forEachNewestFirst(relPath, dataDir, volumeName, img -> {
                 if (cancelled) return false;
                 if (!range.contains(img.dateTakenMillis)) return true;
                 String name = targets.folderFor(img);

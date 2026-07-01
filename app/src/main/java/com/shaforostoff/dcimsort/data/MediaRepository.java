@@ -70,24 +70,29 @@ public class MediaRepository {
         proj.add(MediaStore.Images.Media.BUCKET_ID);
         proj.add(MediaStore.Images.Media.BUCKET_DISPLAY_NAME);
         if (Sdk.atLeastQ()) proj.add(MediaStore.MediaColumns.RELATIVE_PATH);
+        if (Sdk.atLeastQ()) proj.add(MediaStore.MediaColumns.VOLUME_NAME);
         proj.add(MediaStore.MediaColumns.DATA);
 
-        Map<Long, int[]> counts = new LinkedHashMap<>();   // bucketId -> {count}
-        Map<Long, Bucket> meta = new LinkedHashMap<>();
+        // Key: bucketId + ":" + volumeName to distinguish same-name folders on different volumes.
+        Map<String, int[]> counts = new LinkedHashMap<>();
+        Map<String, Bucket> meta = new LinkedHashMap<>();
 
         try (Cursor c = resolver().query(IMAGES, proj.toArray(new String[0]), null, null, null)) {
             if (c == null) return new ArrayList<>();
             int iId = c.getColumnIndex(MediaStore.Images.Media.BUCKET_ID);
             int iName = c.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME);
             int iRel = c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH);
+            int iVol = c.getColumnIndex(MediaStore.MediaColumns.VOLUME_NAME);
             int iData = c.getColumnIndex(MediaStore.MediaColumns.DATA);
             while (c.moveToNext()) {
                 if (iId < 0 || c.isNull(iId)) continue;
                 long id = c.getLong(iId);
-                int[] cnt = counts.get(id);
+                String vol = iVol >= 0 ? c.getString(iVol) : null;
+                String key = id + ":" + vol;
+                int[] cnt = counts.get(key);
                 if (cnt == null) {
                     cnt = new int[]{0};
-                    counts.put(id, cnt);
+                    counts.put(key, cnt);
                     String name = iName >= 0 ? c.getString(iName) : null;
                     String rel = iRel >= 0 ? c.getString(iRel) : null;
                     String data = iData >= 0 ? c.getString(iData) : null;
@@ -95,7 +100,7 @@ public class MediaRepository {
                     if (TextUtils.isEmpty(name)) {
                         name = rel != null ? rel : (dir != null ? new File(dir).getName() : "?");
                     }
-                    meta.put(id, new Bucket(id, name, rel, dir, 0));
+                    meta.put(key, new Bucket(id, name, rel, dir, 0, vol));
                 }
                 cnt[0]++;
             }
@@ -104,10 +109,10 @@ public class MediaRepository {
         }
 
         List<Bucket> out = new ArrayList<>();
-        for (Map.Entry<Long, Bucket> e : meta.entrySet()) {
+        for (Map.Entry<String, Bucket> e : meta.entrySet()) {
             Bucket b = e.getValue();
             int n = counts.get(e.getKey())[0];
-            out.add(new Bucket(b.id, b.displayName, b.relativePath, b.dataDir, n));
+            out.add(new Bucket(b.id, b.displayName, b.relativePath, b.dataDir, n, b.volumeName));
         }
         Collections.sort(out, new Comparator<Bucket>() {
             @Override public int compare(Bucket a, Bucket b) { return Integer.compare(b.count, a.count); }
@@ -118,10 +123,15 @@ public class MediaRepository {
     /** Finds the camera bucket (DCIM/Camera), or the largest DCIM bucket, else null. */
     public Bucket findDefaultCameraBucket() {
         List<Bucket> buckets = listBuckets();
-        // 1) Exact DCIM/Camera by relative path (29+).
+        // 1) Exact DCIM/Camera on internal storage first, then any volume.
+        Bucket anyCamera = null;
         for (Bucket b : buckets) {
-            if (b.relativePath != null && equalsPath(b.relativePath, "DCIM/Camera/")) return b;
+            if (b.relativePath != null && equalsPath(b.relativePath, "DCIM/Camera/")) {
+                if ("external_primary".equals(b.volumeName)) return b;
+                if (anyCamera == null) anyCamera = b;
+            }
         }
+        if (anyCamera != null) return anyCamera;
         // 2) By data dir ending in /DCIM/Camera.
         for (Bucket b : buckets) {
             if (b.dataDir != null && b.dataDir.replace('\\', '/').endsWith("/DCIM/Camera")) return b;
@@ -152,6 +162,20 @@ public class MediaRepository {
 
     /** Iterates images in a folder, newest first, invoking {@code cb} per row. */
     public void forEachNewestFirst(String relativePath, String dataDir, RowCallback cb) {
+        forEachNewestFirst(relativePath, dataDir, null, cb);
+    }
+
+    /** Iterates images in a folder on a specific storage volume, newest first. */
+    public void forEachNewestFirst(String relativePath, String dataDir, String volumeName,
+                                   RowCallback cb) {
+        // On API 29+, use a volume-specific URI so files from other volumes with the same
+        // relative path (e.g. both internal and SD card having DCIM/Camera/) are not mixed in.
+        Uri baseUri = IMAGES;
+        if (Sdk.atLeastQ() && volumeName != null) {
+            try {
+                baseUri = MediaStore.Images.Media.getContentUri(volumeName);
+            } catch (Exception ignore) {}
+        }
         Sel sel = folderSelection(relativePath, dataDir);
 
         List<String> proj = new ArrayList<>();
@@ -170,7 +194,7 @@ public class MediaRepository {
         String sort = MediaStore.Images.Media.DATE_TAKEN + " DESC, "
                 + MediaStore.Images.Media.DATE_ADDED + " DESC";
 
-        try (Cursor c = resolver().query(IMAGES, proj.toArray(new String[0]), sel.where, sel.args, sort)) {
+        try (Cursor c = resolver().query(baseUri, proj.toArray(new String[0]), sel.where, sel.args, sort)) {
             if (c == null) return;
             int iId = c.getColumnIndex(MediaStore.Images.Media._ID);
             int iName = c.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME);

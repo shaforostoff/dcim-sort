@@ -11,6 +11,7 @@ public class SettingsStore {
     private static final String K_BUCKET_ID = "source_bucket_id";
     private static final String K_DISPLAY = "source_display_name";
     private static final String K_DATA_PATH = "source_data_path";
+    private static final String K_VOLUME = "source_volume_name";
     private static final String K_MODE = "compress_mode";
     private static final String K_QUALITY = "quality";
     private static final String K_SKIP_FAV = "skip_favorites";
@@ -25,12 +26,14 @@ public class SettingsStore {
         return prefs.contains(K_REL_PATH) || prefs.contains(K_DATA_PATH);
     }
 
-    public void setSourceFolder(String relativePath, long bucketId, String displayName, String dataPath) {
+    public void setSourceFolder(String relativePath, long bucketId, String displayName,
+                                String dataPath, String volumeName) {
         prefs.edit()
                 .putString(K_REL_PATH, relativePath)
                 .putLong(K_BUCKET_ID, bucketId)
                 .putString(K_DISPLAY, displayName)
                 .putString(K_DATA_PATH, dataPath)
+                .putString(K_VOLUME, volumeName)
                 .apply();
     }
 
@@ -38,6 +41,7 @@ public class SettingsStore {
     public long getBucketId() { return prefs.getLong(K_BUCKET_ID, -1); }
     public String getDisplayName() { return prefs.getString(K_DISPLAY, null); }
     public String getDataPath() { return prefs.getString(K_DATA_PATH, null); }
+    public String getVolumeName() { return prefs.getString(K_VOLUME, null); }
 
     public CompressMode getMode() {
         return CompressMode.fromName(prefs.getString(K_MODE, CompressMode.NONE.name()), CompressMode.NONE);

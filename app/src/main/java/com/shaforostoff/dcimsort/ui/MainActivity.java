@@ -71,7 +71,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private ProgressBar progressBar;
 
     // Current folder
-    private String relPath, dataDir, displayName;
+    private String relPath, dataDir, displayName, volumeName;
     private long bucketId = -1;
 
     // Cached folder contents (newest-first) + date-range scoping
@@ -223,6 +223,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             dataDir = settings.getDataPath();
             displayName = settings.getDisplayName();
             bucketId = settings.getBucketId();
+            volumeName = settings.getVolumeName();
             applyFolder();
         } else {
             txtStats.setText(R.string.counting);
@@ -230,7 +231,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 final Bucket b = repo.findDefaultCameraBucket();
                 main.post(() -> {
                     if (b != null) {
-                        setFolder(b.relativePath, b.dataDir, b.displayName, b.id);
+                        setFolder(b.relativePath, b.dataDir, b.displayName, b.id, b.volumeName);
                     } else {
                         txtFolder.setText(R.string.no_folder_selected);
                         txtStats.setText(R.string.no_photos);
@@ -240,12 +241,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         }
     }
 
-    private void setFolder(String rel, String dir, String display, long id) {
+    private void setFolder(String rel, String dir, String display, long id, String vol) {
         relPath = rel;
         dataDir = dir;
         displayName = display;
         bucketId = id;
-        settings.setSourceFolder(rel, id, display, dir);
+        volumeName = vol;
+        settings.setSourceFolder(rel, id, display, dir, vol);
         applyFolder();
     }
 
@@ -266,10 +268,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         txtStats.setText(R.string.counting);
         txtPlan.setText("");
         setRangeControlsEnabled(false);
-        final String rel = relPath, dir = dataDir;
+        final String rel = relPath, dir = dataDir, vol = volumeName;
         executor.execute(() -> {
             final List<MediaImage> imgs = new ArrayList<>();
-            repo.forEachNewestFirst(rel, dir, img -> {
+            repo.forEachNewestFirst(rel, dir, vol, img -> {
                 imgs.add(img);
                 return true;
             });
@@ -443,6 +445,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private void putFolderExtras(Intent i) {
         i.putExtra(Extras.REL_PATH, relPath);
         i.putExtra(Extras.DATA_DIR, dataDir);
+        i.putExtra(Extras.VOLUME_NAME, volumeName);
         i.putExtra(Extras.DISPLAY, displayName);
         i.putExtra(Extras.MODE, currentMode().name());
         i.putExtra(Extras.QUALITY, seekQuality.getProgress());
@@ -544,6 +547,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         req.skipFavorites = pendingSkipFav;
         req.sourceRelativePath = pendingRel;
         req.sourceDataDir = pendingDir;
+        req.volumeName = volumeName;
         OrganizeRequest.set(req);
 
         progressGroup.setVisibility(View.VISIBLE);
@@ -607,7 +611,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                         data.getStringExtra(Extras.RESULT_REL_PATH),
                         data.getStringExtra(Extras.RESULT_DATA_DIR),
                         data.getStringExtra(Extras.RESULT_DISPLAY),
-                        data.getLongExtra(Extras.RESULT_BUCKET_ID, -1));
+                        data.getLongExtra(Extras.RESULT_BUCKET_ID, -1),
+                        data.getStringExtra(Extras.VOLUME_NAME));
             }
         } else if (requestCode == REQ_CONSENT) {
             if (resultCode == RESULT_OK) {

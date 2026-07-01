@@ -46,6 +46,7 @@ public class FolderPickerActivity extends Activity {
             result.putExtra(Extras.RESULT_REL_PATH, b.relativePath);
             result.putExtra(Extras.RESULT_DATA_DIR, b.dataDir);
             result.putExtra(Extras.RESULT_DISPLAY, b.displayName);
+            result.putExtra(Extras.VOLUME_NAME, b.volumeName);
             setResult(RESULT_OK, result);
             finish();
         });
@@ -87,7 +88,11 @@ public class FolderPickerActivity extends Activity {
                         Bucket b = result.get(position);
                         TextView t1 = v.findViewById(android.R.id.text1);
                         TextView t2 = v.findViewById(android.R.id.text2);
-                        t1.setText(b.displayName);
+                        String label = b.displayName;
+                        if (b.volumeName != null && !"external_primary".equals(b.volumeName)) {
+                            label = label + " (SD)";
+                        }
+                        t1.setText(label);
                         String path = b.relativePath != null ? b.relativePath
                                 : (b.dataDir != null ? b.dataDir : "");
                         t2.setText(getString(R.string.photos_count_only, b.count) + "  ·  " + path);

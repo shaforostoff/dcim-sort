@@ -16,6 +16,7 @@ public class OrganizeRequest {
     public boolean skipFavorites;
     public String sourceRelativePath;   // e.g. "DCIM/Camera/"
     public String sourceDataDir;        // legacy absolute dir
+    public String volumeName;           // "external_primary" = internal; SD UUID; null = legacy
 
     private static volatile OrganizeRequest pending;
 

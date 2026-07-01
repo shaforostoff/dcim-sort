@@ -125,15 +125,15 @@ public class Mover {
     // ---- Publish recompressed ----------------------------------------------
 
     public boolean publishRecompressed(MediaImage img, File temp, CompressMode mode,
-                                       String sourceRel, String folder) {
+                                       String sourceRel, String folder, String volumeName) {
         if (Sdk.atLeastQ()) {
-            return publishViaMediaStore(img, temp, mode, sourceRel, folder);
+            return publishViaMediaStore(img, temp, mode, sourceRel, folder, volumeName);
         }
         return publishLegacy(img, temp, mode, folder);
     }
 
     private boolean publishViaMediaStore(MediaImage img, File temp, CompressMode mode,
-                                         String sourceRel, String folder) {
+                                         String sourceRel, String folder, String volumeName) {
         String newRel = childRelativePath(sourceRel, folder);
         // MediaStore insert into images/media only accepts DCIM/ or Pictures/ as the top-level dir.
         if (!newRel.startsWith("DCIM/") && !newRel.startsWith("Pictures/")) {
@@ -150,9 +150,14 @@ public class Mover {
             cv.put(MediaStore.MediaColumns.IS_FAVORITE, 1);
         }
 
+        Uri insertUri = IMAGES;
+        if (Sdk.atLeastQ() && volumeName != null && !"external".equals(volumeName)) {
+            try { insertUri = MediaStore.Images.Media.getContentUri(volumeName); }
+            catch (Exception ignore) {}
+        }
         Uri newUri;
         try {
-            newUri = resolver().insert(IMAGES, cv);
+            newUri = resolver().insert(insertUri, cv);
         } catch (Exception e) {
             debugLog("PUB insert threw: " + e);
             return false;

@@ -150,7 +150,7 @@ public class OrganizeService extends Service {
                         if (temp != null) {
                             try {
                                 ok = mover.publishRecompressed(
-                                        img, temp, req.mode, req.sourceRelativePath, folder);
+                                        img, temp, req.mode, req.sourceRelativePath, folder, req.volumeName);
                             } finally {
                                 temp.delete();
                             }
