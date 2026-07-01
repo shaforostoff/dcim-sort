@@ -62,10 +62,17 @@ public class SettingsStore {
         prefs.edit().putString(K_GROUP_MODE, mode.name()).apply();
     }
 
-    public int getQuality() { return prefs.getInt(K_QUALITY, 80); }
+    /** Quality is remembered per compression mode (WebP and HEIC keep separate values). */
+    public int getQuality(CompressMode mode) {
+        return prefs.getInt(qualityKey(mode), 80);
+    }
 
-    public void setQuality(int quality) {
-        prefs.edit().putInt(K_QUALITY, Math.max(0, Math.min(100, quality))).apply();
+    public void setQuality(CompressMode mode, int quality) {
+        prefs.edit().putInt(qualityKey(mode), Math.max(0, Math.min(100, quality))).apply();
+    }
+
+    private static String qualityKey(CompressMode mode) {
+        return K_QUALITY + "_" + mode.name();
     }
 
     public boolean getSkipFavorites() { return prefs.getBoolean(K_SKIP_FAV, false); }

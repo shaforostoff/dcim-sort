@@ -193,6 +193,11 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             if (Sdk.atLeastR()) {
                 checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
             }
+            if (mode.recompresses()) {
+                int q = settings.getQuality(mode);
+                seekQuality.setProgress(q);
+                txtQuality.setText(getString(R.string.quality_label, q));
+            }
             recomputeSummary();
         });
 
@@ -202,7 +207,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             }
             @Override public void onStartTrackingTouch(SeekBar s) {}
             @Override public void onStopTrackingTouch(SeekBar s) {
-                settings.setQuality(s.getProgress());
+                settings.setQuality(currentMode(), s.getProgress());
                 recomputeSummary();
             }
         });
@@ -245,7 +250,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (Sdk.atLeastR()) {
             checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
         }
-        int q = settings.getQuality();
+        int q = settings.getQuality(mode);
         seekQuality.setProgress(q);
         txtQuality.setText(getString(R.string.quality_label, q));
         checkSkipFav.setChecked(settings.getSkipFavorites());
