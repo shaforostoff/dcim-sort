@@ -6,11 +6,11 @@
     <string name="title_preview">Preview</string>
 
     <!-- Main screen -->
-    <string name="browse">Browse…</string>
+    <string name="browse">Folders</string>
+    <string name="pick_files">Files</string>
     <string name="no_folder_selected">No folder selected</string>
     <string name="counting">Counting…</string>
     <string name="calculating_size">calculating size…</string>
-    <string name="photos_count_size">%1$d photos · %2$s</string>
     <string name="photos_count_only">%1$d photos</string>
 
     <string name="groupfolder_label">Group into folders</string>
@@ -34,6 +34,8 @@
     <string name="plan_summary_estimated">%1$d files · ~%2$s</string>
     <string name="plan_summary_exact">%1$d files · %2$s</string>
     <string name="plan_estimating">%1$d files · estimating…</string>
+    <string name="plan_summary_from">%1$d files · %2$s → ~%3$s</string>
+    <string name="plan_estimating_from">%1$d files · %2$s → estimating…</string>
 
     <string name="preview">Preview</string>
     <string name="organize">Organize</string>

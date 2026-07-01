@@ -138,9 +138,11 @@ public class OrganizeService extends Service {
                 try {
                     String folder = targets.folderFor(img);
                     currentFolder = folder;
+                    String srcRel = req.sourceRelativePath != null
+                            ? req.sourceRelativePath : img.relativePath;
                     boolean isMove = !req.mode.recompresses() || (req.skipFavorites && img.favorite);
                     if (isMove) {
-                        Mover.Outcome o = mover.move(img, req.sourceRelativePath, folder);
+                        Mover.Outcome o = mover.move(img, srcRel, folder);
                         if (o == Mover.Outcome.MOVED) moved.incrementAndGet();
                         else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
                         else failed.incrementAndGet();
@@ -150,7 +152,7 @@ public class OrganizeService extends Service {
                         if (temp != null) {
                             try {
                                 ok = mover.publishRecompressed(
-                                        img, temp, req.mode, req.sourceRelativePath, folder, req.volumeName);
+                                        img, temp, req.mode, srcRel, folder, req.volumeName);
                             } finally {
                                 temp.delete();
                             }

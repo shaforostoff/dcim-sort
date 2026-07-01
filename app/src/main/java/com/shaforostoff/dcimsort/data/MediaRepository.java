@@ -234,6 +234,70 @@ public class MediaRepository {
         }
     }
 
+    // ---- Fetch by ID list --------------------------------------------------
+
+    /** Returns MediaImage objects for the given MediaStore IDs, sorted by DATE_TAKEN DESC. */
+    public List<MediaImage> fetchByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return Collections.emptyList();
+        String[] placeholders = new String[ids.size()];
+        String[] args = new String[ids.size()];
+        for (int i = 0; i < ids.size(); i++) {
+            placeholders[i] = "?";
+            args[i] = String.valueOf(ids.get(i));
+        }
+        String where = MediaStore.Images.Media._ID + " IN (" + TextUtils.join(",", placeholders) + ")";
+        String sort = MediaStore.Images.Media.DATE_TAKEN + " DESC, "
+                + MediaStore.Images.Media.DATE_ADDED + " DESC";
+
+        List<String> proj = new ArrayList<>();
+        proj.add(MediaStore.Images.Media._ID);
+        proj.add(MediaStore.Images.Media.DISPLAY_NAME);
+        proj.add(MediaStore.MediaColumns.DATA);
+        proj.add(MediaStore.Images.Media.DATE_TAKEN);
+        proj.add(MediaStore.Images.Media.DATE_ADDED);
+        proj.add(MediaStore.MediaColumns.SIZE);
+        proj.add(MediaStore.MediaColumns.MIME_TYPE);
+        proj.add(MediaStore.MediaColumns.WIDTH);
+        proj.add(MediaStore.MediaColumns.HEIGHT);
+        if (Sdk.atLeastQ()) proj.add(MediaStore.MediaColumns.RELATIVE_PATH);
+        if (Sdk.atLeastR()) proj.add(MediaStore.MediaColumns.IS_FAVORITE);
+        proj.add(MediaStore.Images.ImageColumns.DESCRIPTION);
+
+        List<MediaImage> result = new ArrayList<>();
+        try (Cursor c = resolver().query(IMAGES, proj.toArray(new String[0]), where, args, sort)) {
+            if (c == null) return result;
+            int iId   = c.getColumnIndex(MediaStore.Images.Media._ID);
+            int iName = c.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME);
+            int iData = c.getColumnIndex(MediaStore.MediaColumns.DATA);
+            int iTaken= c.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN);
+            int iAdded= c.getColumnIndex(MediaStore.Images.Media.DATE_ADDED);
+            int iSize = c.getColumnIndex(MediaStore.MediaColumns.SIZE);
+            int iMime = c.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE);
+            int iW    = c.getColumnIndex(MediaStore.MediaColumns.WIDTH);
+            int iH    = c.getColumnIndex(MediaStore.MediaColumns.HEIGHT);
+            int iRel  = c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH);
+            int iFav  = c.getColumnIndex(MediaStore.MediaColumns.IS_FAVORITE);
+            int iDesc = c.getColumnIndex(MediaStore.Images.ImageColumns.DESCRIPTION);
+            while (c.moveToNext()) {
+                long id   = iId   >= 0 ? c.getLong(iId)   : -1;
+                String name = iName >= 0 ? c.getString(iName) : null;
+                String data = iData >= 0 ? c.getString(iData) : null;
+                long taken  = iTaken >= 0 && !c.isNull(iTaken) ? c.getLong(iTaken) : 0;
+                if (taken <= 0 && iAdded >= 0 && !c.isNull(iAdded))
+                    taken = c.getLong(iAdded) * 1000L;
+                long size  = iSize >= 0 && !c.isNull(iSize) ? c.getLong(iSize) : 0;
+                String mime = iMime >= 0 ? c.getString(iMime) : null;
+                int w  = iW >= 0 && !c.isNull(iW) ? c.getInt(iW) : 0;
+                int h  = iH >= 0 && !c.isNull(iH) ? c.getInt(iH) : 0;
+                String rel  = iRel  >= 0 ? c.getString(iRel)  : null;
+                boolean fav = iFav  >= 0 && !c.isNull(iFav) && c.getInt(iFav) != 0;
+                String desc = iDesc >= 0 && !c.isNull(iDesc) ? c.getString(iDesc) : null;
+                result.add(new MediaImage(id, name, rel, data, taken, size, fav, mime, w, h, desc));
+            }
+        } catch (Exception ignore) {}
+        return result;
+    }
+
     // ---- EXIF original stream ----------------------------------------------
 
     /**

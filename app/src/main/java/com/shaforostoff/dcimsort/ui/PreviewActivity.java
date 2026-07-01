@@ -53,6 +53,7 @@ public class PreviewActivity extends Activity {
     private ThumbnailLoader thumbLoader;
 
     private String relPath, dataDir, volumeName;
+    private long[] fileIds; // files mode: explicit MediaStore IDs instead of a folder query
     private CompressMode mode;
     private GroupMode groupMode;
     private int quality;
@@ -84,6 +85,7 @@ public class PreviewActivity extends Activity {
         relPath = getIntent().getStringExtra(Extras.REL_PATH);
         dataDir = getIntent().getStringExtra(Extras.DATA_DIR);
         volumeName = getIntent().getStringExtra(Extras.VOLUME_NAME);
+        fileIds = getIntent().getLongArrayExtra(Extras.FILE_IDS);
         mode = CompressMode.fromName(getIntent().getStringExtra(Extras.MODE), CompressMode.NONE);
         groupMode = GroupMode.fromName(getIntent().getStringExtra(Extras.GROUP_MODE), GroupMode.PLACE_MONTH);
         quality = getIntent().getIntExtra(Extras.QUALITY, 80);
@@ -133,7 +135,7 @@ public class PreviewActivity extends Activity {
 
         executor.execute(() -> {
             final Map<String, PlanFolder> map = new LinkedHashMap<>();
-            repo.forEachNewestFirst(relPath, dataDir, volumeName, img -> {
+            MediaRepository.RowCallback group = img -> {
                 if (cancelled) return false;
                 if (!range.contains(img.dateTakenMillis)) return true;
                 String name = targets.folderFor(img);
@@ -145,7 +147,16 @@ public class PreviewActivity extends Activity {
                 pf.images.add(img);
                 pf.currentBytes += img.size;
                 return true;
-            });
+            };
+            if (fileIds != null && fileIds.length > 0) {
+                List<Long> ids = new ArrayList<>(fileIds.length);
+                for (long id : fileIds) ids.add(id);
+                for (MediaImage img : repo.fetchByIds(ids)) {
+                    if (!group.onImage(img)) break;
+                }
+            } else {
+                repo.forEachNewestFirst(relPath, dataDir, volumeName, group);
+            }
             final List<PlanFolder> list = new ArrayList<>(map.values());
             estimate(list);
             if (cancelled) return;

@@ -52,6 +52,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private static final int REQ_PERMISSIONS = 10;
     private static final int REQ_PICK_FOLDER = 11;
     private static final int REQ_CONSENT = 12;
+    private static final int REQ_PICK_FILES = 13;
     private static final int CONSENT_CHUNK = 480;
 
     private static final int CONSENT_WRITE = 0;
@@ -62,20 +63,24 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     // Views
-    private TextView txtFolder, txtStats, txtQuality, txtProgress, txtPlan;
+    private TextView txtFolder, txtQuality, txtProgress, txtPlan;
     private RadioGroup radioMode;
     private RadioButton radioNone, radioWebp, radioHeic;
     private RadioGroup radioGroupMode;
     private RadioButton radioGroupNone, radioGroupPlaceMonth, radioGroupPlaceDay;
-    private LinearLayout qualityGroup, progressGroup;
+    private LinearLayout qualityGroup, progressGroup, dateRangeGroup;
     private SeekBar seekQuality;
     private CheckBox checkSkipFav;
-    private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnDateFrom, btnDateTo;
+    private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnFiles, btnDateFrom, btnDateTo;
     private ProgressBar progressBar;
 
     // Current folder
     private String relPath, dataDir, displayName, volumeName;
     private long bucketId = -1;
+
+    // Files mode: images picked individually via the system photo picker (no source folder).
+    private boolean filesMode;
+    private long[] pickedIds;
 
     // Cached folder contents (newest-first) + date-range scoping
     private List<MediaImage> allImages;
@@ -116,14 +121,14 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             initFolder();
         } else {
             requestNeededPermissions();
-            txtStats.setText(R.string.need_media_permission);
+            txtPlan.setText(R.string.need_media_permission);
         }
     }
 
     private void bindViews() {
         btnBrowse = findViewById(R.id.btn_browse);
+        btnFiles = findViewById(R.id.btn_files);
         txtFolder = findViewById(R.id.txt_folder);
-        txtStats = findViewById(R.id.txt_stats);
         radioMode = findViewById(R.id.radio_compressmode);
         radioNone = findViewById(R.id.radio_compressnone);
         radioWebp = findViewById(R.id.radio_compresswebp);
@@ -136,6 +141,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         radioGroupNone = findViewById(R.id.radio_groupnone);
         radioGroupPlaceMonth = findViewById(R.id.radio_groupplacemonth);
         radioGroupPlaceDay = findViewById(R.id.radio_groupplaceday);
+        dateRangeGroup = findViewById(R.id.date_range_group);
         btnDateFrom = findViewById(R.id.btn_date_from);
         btnDateTo = findViewById(R.id.btn_date_to);
         txtPlan = findViewById(R.id.txt_plan);
@@ -154,6 +160,14 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 return;
             }
             startActivityForResult(new Intent(this, FolderPickerActivity.class), REQ_PICK_FOLDER);
+        });
+
+        btnFiles.setOnClickListener(v -> {
+            if (!PermissionManager.hasReadMedia(this)) {
+                requestNeededPermissions();
+                return;
+            }
+            startPickFiles();
         });
 
         // HEIC only when the device can encode it.
@@ -256,7 +270,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             volumeName = settings.getVolumeName();
             applyFolder();
         } else {
-            txtStats.setText(R.string.counting);
+            txtPlan.setText(R.string.counting);
             executor.execute(() -> {
                 final Bucket b = repo.findDefaultCameraBucket();
                 main.post(() -> {
@@ -264,7 +278,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                         setFolder(b.relativePath, b.dataDir, b.displayName, b.id, b.volumeName);
                     } else {
                         txtFolder.setText(R.string.no_folder_selected);
-                        txtStats.setText(R.string.no_photos);
+                        txtPlan.setText(R.string.no_photos);
                     }
                 });
             });
@@ -282,6 +296,9 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     }
 
     private void applyFolder() {
+        filesMode = false;
+        pickedIds = null;
+        dateRangeGroup.setVisibility(View.VISIBLE);
         txtFolder.setText(displayName != null ? displayName
                 : (relPath != null ? relPath : getString(R.string.no_folder_selected)));
         loadFolder();
@@ -290,13 +307,11 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     /** Gathers the folder's images once, then derives stats, the date span, and the plan summary. */
     private void loadFolder() {
         if (relPath == null && dataDir == null) {
-            txtStats.setText(R.string.no_folder_selected);
             txtPlan.setText("");
             return;
         }
         allImages = null;
-        txtStats.setText(R.string.counting);
-        txtPlan.setText("");
+        txtPlan.setText(R.string.counting);
         setRangeControlsEnabled(false);
         final String rel = relPath, dir = dataDir, vol = volumeName;
         executor.execute(() -> {
@@ -305,28 +320,68 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 imgs.add(img);
                 return true;
             });
-            long sum = 0, min = Long.MAX_VALUE, max = Long.MIN_VALUE;
+            long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
             for (MediaImage m : imgs) {
-                sum += m.size;
                 if (m.dateTakenMillis > 0) {
                     min = Math.min(min, m.dateTakenMillis);
                     max = Math.max(max, m.dateTakenMillis);
                 }
             }
-            final long fSum = sum;
             final long fMin = (min == Long.MAX_VALUE) ? 0 : min;
             final long fMax = (max == Long.MIN_VALUE) ? 0 : max;
             main.post(() -> {
                 if (!sameFolder(rel, dir)) return;
                 allImages = imgs;
-                txtStats.setText(getString(R.string.photos_count_size,
-                        imgs.size(), Formatter.humanReadableBytes(fSum)));
                 folderMinDate = fMin;
                 folderMaxDate = fMax;
                 rangeFrom = fMin > 0 ? startOfDay(fMin) : Long.MIN_VALUE;
                 rangeTo = fMax > 0 ? endOfDay(fMax) : Long.MAX_VALUE;
                 updateDateLabels();
                 setRangeControlsEnabled(fMin > 0);
+                recomputeSummary();
+            });
+        });
+    }
+
+    // ---- File picker (individual files) ------------------------------------
+
+    private void startPickFiles() {
+        Intent intent;
+        if (Sdk.atLeastT()) {
+            intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            intent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit());
+        } else {
+            intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("image/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
+        startActivityForResult(intent, REQ_PICK_FILES);
+    }
+
+    private void loadPickedFiles(List<Uri> uris) {
+        List<Long> ids = new ArrayList<>();
+        for (Uri u : uris) {
+            try { ids.add(Long.parseLong(u.getLastPathSegment())); }
+            catch (NumberFormatException ignore) {}
+        }
+        if (ids.isEmpty()) return;
+        relPath = null; dataDir = null; displayName = null; volumeName = null; bucketId = -1;
+        allImages = null;
+        filesMode = true;
+        pickedIds = new long[ids.size()];
+        for (int i = 0; i < ids.size(); i++) pickedIds[i] = ids.get(i);
+        // No source folder in files mode; date range is implied by the picked set.
+        txtFolder.setText("");
+        dateRangeGroup.setVisibility(View.GONE);
+        // Whole picked set is always in range; no date filtering in files mode.
+        rangeFrom = Long.MIN_VALUE;
+        rangeTo = Long.MAX_VALUE;
+        txtPlan.setText(R.string.counting);
+        final List<Long> fIds = ids;
+        executor.execute(() -> {
+            final List<MediaImage> imgs = repo.fetchByIds(fIds);
+            main.post(() -> {
+                allImages = imgs;
                 recomputeSummary();
             });
         });
@@ -448,14 +503,17 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                     Formatter.humanReadableBytes(0)));
             return;
         }
+        long originalTotal = 0;
+        for (MediaImage m : inRange) originalTotal += m.size;
+
         if (!mode.recompresses()) {
-            long total = 0;
-            for (MediaImage m : inRange) total += m.size;
             txtPlan.setText(getString(R.string.plan_summary_exact, count,
-                    Formatter.humanReadableBytes(total)));
+                    Formatter.humanReadableBytes(originalTotal)));
             return;
         }
-        txtPlan.setText(getString(R.string.plan_estimating, count));
+        final long fOriginalTotal = originalTotal;
+        txtPlan.setText(getString(R.string.plan_estimating_from, count,
+                Formatter.humanReadableBytes(fOriginalTotal)));
         final Recompressor rc = new Recompressor(this, repo);
         executor.execute(() -> {
             double ratio = SizeEstimator.calibrateRatio(
@@ -465,7 +523,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             lastEstimateRatio = ratio; // reused by Preview instead of re-encoding samples
             main.post(() -> {
                 if (gen == summaryGen) {
-                    txtPlan.setText(getString(R.string.plan_summary_estimated, count,
+                    txtPlan.setText(getString(R.string.plan_summary_from, count,
+                            Formatter.humanReadableBytes(fOriginalTotal),
                             Formatter.humanReadableBytes(est)));
                 }
             });
@@ -475,7 +534,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // ---- Preview ------------------------------------------------------------
 
     private void openPreview() {
-        if (relPath == null && dataDir == null) {
+        if (relPath == null && dataDir == null && !filesMode) {
             toast(R.string.select_folder_first);
             return;
         }
@@ -489,6 +548,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         i.putExtra(Extras.REL_PATH, relPath);
         i.putExtra(Extras.DATA_DIR, dataDir);
         i.putExtra(Extras.VOLUME_NAME, volumeName);
+        if (filesMode) i.putExtra(Extras.FILE_IDS, pickedIds);
         i.putExtra(Extras.DISPLAY, displayName);
         i.putExtra(Extras.MODE, currentMode().name());
         i.putExtra(Extras.GROUP_MODE, currentGroupMode().name());
@@ -501,7 +561,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // ---- Organize -----------------------------------------------------------
 
     private void startOrganize() {
-        if (relPath == null && dataDir == null) {
+        if (relPath == null && dataDir == null && allImages == null) {
             toast(R.string.select_folder_first);
             return;
         }
@@ -607,6 +667,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         btnOrganize.setEnabled(!busy);
         btnPreview.setEnabled(!busy);
         btnBrowse.setEnabled(!busy);
+        btnFiles.setEnabled(!busy);
     }
 
     // ---- Progress listener --------------------------------------------------
@@ -665,6 +726,17 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                         data.getLongExtra(Extras.RESULT_BUCKET_ID, -1),
                         data.getStringExtra(Extras.VOLUME_NAME));
             }
+        } else if (requestCode == REQ_PICK_FILES) {
+            if (resultCode == RESULT_OK && data != null) {
+                List<Uri> uris = new ArrayList<>();
+                if (data.getClipData() != null) {
+                    for (int i = 0; i < data.getClipData().getItemCount(); i++)
+                        uris.add(data.getClipData().getItemAt(i).getUri());
+                } else if (data.getData() != null) {
+                    uris.add(data.getData());
+                }
+                if (!uris.isEmpty()) loadPickedFiles(uris);
+            }
         } else if (requestCode == REQ_CONSENT) {
             if (resultCode == RESULT_OK) {
                 consentIndex++;
@@ -698,7 +770,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             if (PermissionManager.hasReadMedia(this)) {
                 initFolder();
             } else {
-                txtStats.setText(R.string.need_media_permission);
+                txtPlan.setText(R.string.need_media_permission);
             }
         }
     }
