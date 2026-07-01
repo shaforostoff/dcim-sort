@@ -57,6 +57,7 @@
     <string name="organize_channel_name">Прогрес організації</string>
     <string name="organize_done">Готово: %1$d переміщено, %2$d пропущено, %3$d не вдалося</string>
     <string name="organize_stopped">Зупинено</string>
+    <string name="organize_saved_to">Збережено в:</string>
 
     <!-- Preview list -->
     <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>

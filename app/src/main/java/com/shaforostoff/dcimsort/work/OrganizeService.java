@@ -25,7 +25,10 @@ import com.shaforostoff.dcimsort.util.ThreadPlanner;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -48,7 +51,7 @@ public class OrganizeService extends Service {
     /** Listener for the foreground UI. */
     public interface Listener {
         void onProgress(int done, int total, String folder);
-        void onDone(int moved, int skipped, int failed, boolean stopped);
+        void onDone(int moved, int skipped, int failed, boolean stopped, List<String> folders);
     }
 
     // Last-known state so a freshly-bound Activity renders immediately.
@@ -136,6 +139,8 @@ public class OrganizeService extends Service {
         final AtomicInteger skipped = new AtomicInteger();
         final AtomicInteger failed = new AtomicInteger();
         final AtomicInteger sinceFlush = new AtomicInteger();
+        // Distinct destination subfolders that actually received a file, for the completion summary.
+        final Set<String> destFolders = ConcurrentHashMap.newKeySet();
         List<Future<?>> futures = new ArrayList<>();
 
         for (final MediaImage img : req.images) {
@@ -166,11 +171,11 @@ public class OrganizeService extends Service {
                         } finally {
                             if (temp != null) temp.delete();
                         }
-                        if (ok) moved.incrementAndGet();
+                        if (ok) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
                         else failed.incrementAndGet();
                     } else if (!recompress) {
                         Mover.Outcome o = mover.move(img, srcRel, folder);
-                        if (o == Mover.Outcome.MOVED) moved.incrementAndGet();
+                        if (o == Mover.Outcome.MOVED) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
                         else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
                         else failed.incrementAndGet();
                     } else {
@@ -179,7 +184,7 @@ public class OrganizeService extends Service {
                             // Too little saved → leave the photo uncompressed and just move it.
                             temp.delete();
                             Mover.Outcome o = mover.move(img, srcRel, folder);
-                            if (o == Mover.Outcome.MOVED) moved.incrementAndGet();
+                            if (o == Mover.Outcome.MOVED) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
                             else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
                             else failed.incrementAndGet();
                         } else {
@@ -192,7 +197,7 @@ public class OrganizeService extends Service {
                                     temp.delete();
                                 }
                             }
-                            if (ok) moved.incrementAndGet();
+                            if (ok) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
                             else failed.incrementAndGet();
                         }
                     }
@@ -227,11 +232,18 @@ public class OrganizeService extends Service {
         coordCache.flush();
 
         boolean stopped = stop.get();
+        List<String> folders = new ArrayList<>(destFolders);
+        Collections.sort(folders);
         main.post(() -> {
             Listener l = listener;
-            if (l != null) l.onDone(moved.get(), skipped.get(), failed.get(), stopped);
+            if (l != null) l.onDone(moved.get(), skipped.get(), failed.get(), stopped, folders);
         });
         finishService();
+    }
+
+    /** Records a destination subfolder that received a file (ignores the no-grouping null folder). */
+    private static void recordFolder(Set<String> dest, String folder) {
+        if (folder != null && !folder.isEmpty()) dest.add(folder);
     }
 
     /**

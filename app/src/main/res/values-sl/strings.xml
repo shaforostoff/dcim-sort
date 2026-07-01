@@ -57,6 +57,7 @@
     <string name="organize_channel_name">Napredek organiziranja</string>
     <string name="organize_done">Končano: %1$d premaknjenih, %2$d preskočenih, %3$d neuspešnih</string>
     <string name="organize_stopped">Ustavljeno</string>
+    <string name="organize_saved_to">Shranjeno v:</string>
 
     <!-- Preview list -->
     <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>

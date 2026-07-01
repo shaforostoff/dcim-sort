@@ -854,10 +854,15 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     }
 
     @Override
-    public void onDone(int moved, int skipped, int failed, boolean stopped) {
+    public void onDone(int moved, int skipped, int failed, boolean stopped, List<String> folders) {
         setBusy(false);
-        txtProgress.setText(stopped ? getString(R.string.organize_stopped)
+        StringBuilder summary = new StringBuilder(stopped ? getString(R.string.organize_stopped)
                 : getString(R.string.organize_done, moved, skipped, failed));
+        if (folders != null && !folders.isEmpty()) {
+            summary.append('\n').append(getString(R.string.organize_saved_to));
+            for (String folder : folders) summary.append("\n• ").append(folder);
+        }
+        txtProgress.setText(summary);
         progressBar.setProgress(100);
         btnStop.setVisibility(View.GONE);
         SelectionStore.clear();

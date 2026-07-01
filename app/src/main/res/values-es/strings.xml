@@ -57,6 +57,7 @@
     <string name="organize_channel_name">Progreso de organización</string>
     <string name="organize_done">Listo: %1$d movidas, %2$d omitidas, %3$d fallidas</string>
     <string name="organize_stopped">Detenido</string>
+    <string name="organize_saved_to">Guardado en:</string>
 
     <!-- Preview list -->
     <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>
