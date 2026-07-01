@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark variants of the adaptive colors defined in values/colors.xml -->
+    <color name="text_hint">#999999</color>
+    <color name="photo_placeholder">#22FFFFFF</color>
+</resources>
