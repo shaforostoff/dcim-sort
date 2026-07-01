@@ -49,6 +49,25 @@ add_subdirectory(${THIRD_PARTY}/libavif libavif EXCLUDE_FROM_ALL)
 # We only need the `jpegli-static` target, which links highway + threads and exposes the
 # libjpeg-compatible jpegli_* API (lib/jpegli/encode.h). Turn off tools/benchmark/JNI/extras and
 # the optional codecs (sjpeg/skcms/lcms/png/openexr) so nothing but the encoder is built.
+#
+# Patch: jpegli's tools/CMakeLists.txt unconditionally defines jpegli_dec_fuzzer_runner even when
+# JPEGLI_ENABLE_FUZZERS=OFF, and the Android Gradle CMake build compiles it despite EXCLUDE_FROM_ALL.
+# Apply a patch that wraps the fuzzer-runner block in if(NOT ANDROID) before add_subdirectory.
+file(READ ${THIRD_PARTY}/jpegli/tools/CMakeLists.txt _jpegli_tools_cmake)
+if(_jpegli_tools_cmake MATCHES "NOT ANDROID")
+    message(STATUS "jpegli patch already applied")
+else()
+    execute_process(
+        COMMAND patch -p1 --input=${CMAKE_CURRENT_SOURCE_DIR}/patches/jpegli-no-fuzzer-runner-on-android.patch
+        WORKING_DIRECTORY ${THIRD_PARTY}/jpegli
+        RESULT_VARIABLE _patch_result
+    )
+    if(NOT _patch_result EQUAL 0)
+        message(FATAL_ERROR "jpegli patch failed (exit code ${_patch_result})")
+    endif()
+    message(STATUS "jpegli patch applied")
+endif()
+unset(_jpegli_tools_cmake)
 set(JPEGLI_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
 set(JPEGLI_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
 set(JPEGLI_ENABLE_DEVTOOLS OFF CACHE BOOL "" FORCE)

@@ -1,0 +1,20 @@
+diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt
+index 509a28b..235dd85 100644
+--- a/tools/CMakeLists.txt
++++ b/tools/CMakeLists.txt
+@@ -180,6 +180,7 @@ endforeach()
+ install(TARGETS ${TOOL_BINARIES} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+ message(STATUS "Building tools: ${TOOL_BINARIES}")
+ 
++if(NOT ANDROID)
+ # jpegli_dec_fuzzer builds even when not JPEGLI_ENABLE_TOOLS
+ set(FUZZER_BINARIES jpegli_dec_fuzzer)
+ 
+@@ -199,6 +200,7 @@ foreach(FUZZER IN LISTS FUZZER_BINARIES)
+   target_include_directories("${BINARY}" PRIVATE "${CMAKE_SOURCE_DIR}")
+   target_link_libraries("${BINARY}" jpegli-static)
+ endforeach()
++endif()  # NOT ANDROID
+ 
+ if(JPEGLI_ENABLE_JNI)
+ find_package(JNI QUIET)
