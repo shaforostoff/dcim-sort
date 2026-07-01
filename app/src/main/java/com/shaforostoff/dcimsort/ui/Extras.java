@@ -10,6 +10,8 @@ public final class Extras {
     public static final String MODE = "mode";
     public static final String QUALITY = "quality";
     public static final String SKIP_FAV = "skip_fav";
+    public static final String DATE_FROM = "date_from";
+    public static final String DATE_TO = "date_to";
 
     // FolderPicker result
     public static final String RESULT_BUCKET_ID = "bucket_id";

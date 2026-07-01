@@ -13,6 +13,7 @@ import android.widget.TextView;
 
 import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.CompressMode;
+import com.shaforostoff.dcimsort.data.DateRange;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.geo.GeoCache;
@@ -20,6 +21,7 @@ import com.shaforostoff.dcimsort.geo.GeoExtractor;
 import com.shaforostoff.dcimsort.geo.PlaceResolver;
 import com.shaforostoff.dcimsort.util.Formatter;
 import com.shaforostoff.dcimsort.work.Recompressor;
+import com.shaforostoff.dcimsort.work.SizeEstimator;
 import com.shaforostoff.dcimsort.work.TargetResolver;
 
 import java.util.ArrayList;
@@ -35,11 +37,6 @@ import java.util.concurrent.Executors;
  */
 public class PreviewActivity extends Activity {
 
-    /** Default bytes-per-megapixel fallbacks when sample calibration is unavailable. */
-    private static final double WEBP_BYTES_PER_MP = 0.22 * 1024 * 1024;
-    private static final double HEIC_BYTES_PER_MP = 0.12 * 1024 * 1024;
-    private static final int SAMPLE_COUNT = 6;
-
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean cancelled = false;
@@ -53,6 +50,7 @@ public class PreviewActivity extends Activity {
     private CompressMode mode;
     private int quality;
     private boolean skipFav;
+    private DateRange range;
 
     private List<PlanFolder> folders;
     private PlanFolder openFolderRef;
@@ -78,6 +76,9 @@ public class PreviewActivity extends Activity {
         mode = CompressMode.fromName(getIntent().getStringExtra(Extras.MODE), CompressMode.NONE);
         quality = getIntent().getIntExtra(Extras.QUALITY, 80);
         skipFav = getIntent().getBooleanExtra(Extras.SKIP_FAV, false);
+        long from = getIntent().getLongExtra(Extras.DATE_FROM, Long.MIN_VALUE);
+        long to = getIntent().getLongExtra(Extras.DATE_TO, Long.MAX_VALUE);
+        range = new DateRange(from, to);
 
         float density = getResources().getDisplayMetrics().density;
         thumbLoader = new ThumbnailLoader(this, (int) (110 * density));
@@ -103,6 +104,7 @@ public class PreviewActivity extends Activity {
             final Map<String, PlanFolder> map = new LinkedHashMap<>();
             repo.forEachNewestFirst(relPath, dataDir, img -> {
                 if (cancelled) return false;
+                if (!range.contains(img.dateTakenMillis)) return true;
                 String name = targets.folderFor(img);
                 PlanFolder pf = map.get(name);
                 if (pf == null) {
@@ -125,45 +127,13 @@ public class PreviewActivity extends Activity {
             for (PlanFolder pf : list) pf.estBytes = pf.currentBytes;
             return;
         }
-        double ratio = calibrateRatio(list, rc);
-        for (PlanFolder pf : list) {
-            long est = 0;
-            for (MediaImage img : pf.images) {
-                double mp = img.megapixels();
-                long e = mp > 0 ? (long) (ratio * mp) : img.size;
-                if (e > img.size && img.size > 0) e = img.size;
-                est += e;
-            }
-            pf.estBytes = est;
-        }
-    }
-
-    /** Sample-encodes a spread of images to derive bytes-per-megapixel for the chosen format. */
-    private double calibrateRatio(List<PlanFolder> list, Recompressor rc) {
+        // Calibrate one ratio across all in-range images, then apply it per folder.
         List<MediaImage> all = new ArrayList<>();
         for (PlanFolder pf : list) all.addAll(pf.images);
-        if (all.isEmpty()) return defaultRatio();
-
-        long sumBytes = 0;
-        double sumMp = 0;
-        int n = Math.min(SAMPLE_COUNT, all.size());
-        int stride = Math.max(1, all.size() / n);
-        for (int i = 0; i < all.size() && sumMp < 100; i += stride) {
-            if (cancelled) break;
-            MediaImage img = all.get(i);
-            double mp = img.megapixels();
-            if (mp <= 0) continue;
-            long bytes = rc.encodedSize(img.contentUri(), mode, quality);
-            if (bytes > 0) {
-                sumBytes += bytes;
-                sumMp += mp;
-            }
+        double ratio = SizeEstimator.calibrateRatio(all, mode, quality, rc, () -> cancelled);
+        for (PlanFolder pf : list) {
+            pf.estBytes = SizeEstimator.estimateWithRatio(pf.images, ratio, mode, skipFav);
         }
-        return sumMp > 0 ? sumBytes / sumMp : defaultRatio();
-    }
-
-    private double defaultRatio() {
-        return mode == CompressMode.HEIC ? HEIC_BYTES_PER_MP : WEBP_BYTES_PER_MP;
     }
 
     private void showFolders(List<PlanFolder> list) {

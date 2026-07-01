@@ -20,6 +20,16 @@
     <string name="quality_label">Quality: %1$d</string>
     <string name="skip_favorites">Do not compress photos marked as favorite</string>
 
+    <!-- Date range -->
+    <string name="date_range_label">Date range</string>
+    <string name="date_from_label">From %1$s</string>
+    <string name="date_to_label">To %1$s</string>
+
+    <!-- Plan summary (above action buttons) -->
+    <string name="plan_summary_estimated">%1$d files · ~%2$s</string>
+    <string name="plan_summary_exact">%1$d files · %2$s</string>
+    <string name="plan_estimating">%1$d files · estimating…</string>
+
     <string name="preview">Preview</string>
     <string name="organize">Organize</string>
     <string name="stop">Stop</string>

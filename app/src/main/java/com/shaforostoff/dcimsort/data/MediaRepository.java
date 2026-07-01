@@ -148,38 +148,6 @@ public class MediaRepository {
         return na.equalsIgnoreCase(nb);
     }
 
-    // ---- Count + size -------------------------------------------------------
-
-    /** Fast count of images directly in a folder (non-recursive). */
-    public int countInFolder(String relativePath, String dataDir) {
-        Sel sel = folderSelection(relativePath, dataDir);
-        String[] proj = {MediaStore.Images.Media._ID};
-        try (Cursor c = resolver().query(IMAGES, proj, sel.where, sel.args, null)) {
-            return c == null ? 0 : c.getCount();
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
-    /** One cursor pass to compute count and total bytes for a folder. */
-    public FolderStats statsForFolder(String relativePath, String dataDir) {
-        Sel sel = folderSelection(relativePath, dataDir);
-        String[] proj = {MediaStore.MediaColumns.SIZE};
-        int count = 0;
-        long total = 0;
-        try (Cursor c = resolver().query(IMAGES, proj, sel.where, sel.args, null)) {
-            if (c == null) return new FolderStats(0, 0);
-            int iSize = c.getColumnIndex(MediaStore.MediaColumns.SIZE);
-            while (c.moveToNext()) {
-                count++;
-                if (iSize >= 0 && !c.isNull(iSize)) total += c.getLong(iSize);
-            }
-        } catch (Exception e) {
-            return new FolderStats(count, total);
-        }
-        return new FolderStats(count, total);
-    }
-
     // ---- Newest-first iteration ---------------------------------------------
 
     /** Iterates images in a folder, newest first, invoking {@code cb} per row. */

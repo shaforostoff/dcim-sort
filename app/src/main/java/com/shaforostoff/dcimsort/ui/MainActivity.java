@@ -1,6 +1,7 @@
 package com.shaforostoff.dcimsort.ui;
 
 import android.app.Activity;
+import android.app.DatePickerDialog;
 import android.app.PendingIntent;
 import android.content.ContentResolver;
 import android.content.Intent;
@@ -25,7 +26,7 @@ import android.widget.Toast;
 import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.Bucket;
 import com.shaforostoff.dcimsort.data.CompressMode;
-import com.shaforostoff.dcimsort.data.FolderStats;
+import com.shaforostoff.dcimsort.data.DateRange;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.data.SettingsStore;
@@ -35,8 +36,12 @@ import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.work.OrganizeRequest;
 import com.shaforostoff.dcimsort.work.OrganizeService;
 import com.shaforostoff.dcimsort.work.Recompressor;
+import com.shaforostoff.dcimsort.work.SizeEstimator;
 
+import java.text.DateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,18 +62,24 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     // Views
-    private TextView txtFolder, txtStats, txtQuality, txtProgress;
+    private TextView txtFolder, txtStats, txtQuality, txtProgress, txtPlan;
     private RadioGroup radioMode;
     private RadioButton radioNone, radioWebp, radioHeic;
     private LinearLayout qualityGroup, progressGroup;
     private SeekBar seekQuality;
     private CheckBox checkSkipFav;
-    private Button btnPreview, btnOrganize, btnStop, btnBrowse;
+    private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnDateFrom, btnDateTo;
     private ProgressBar progressBar;
 
     // Current folder
     private String relPath, dataDir, displayName;
     private long bucketId = -1;
+
+    // Cached folder contents (newest-first) + date-range scoping
+    private List<MediaImage> allImages;
+    private long folderMinDate, folderMaxDate; // span of dated photos; 0 if none
+    private long rangeFrom = Long.MIN_VALUE, rangeTo = Long.MAX_VALUE;
+    private int summaryGen;
 
     // Pending organize job + consent queue
     private List<MediaImage> pendingImages;
@@ -117,6 +128,9 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         txtQuality = findViewById(R.id.txt_quality);
         seekQuality = findViewById(R.id.seek_quality);
         checkSkipFav = findViewById(R.id.check_skip_fav);
+        btnDateFrom = findViewById(R.id.btn_date_from);
+        btnDateTo = findViewById(R.id.btn_date_to);
+        txtPlan = findViewById(R.id.txt_plan);
         btnPreview = findViewById(R.id.btn_preview);
         btnOrganize = findViewById(R.id.btn_organize);
         progressGroup = findViewById(R.id.progress_group);
@@ -147,6 +161,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             CompressMode mode = currentMode();
             settings.setMode(mode);
             qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
+            recomputeSummary();
         });
 
         seekQuality.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -156,14 +171,24 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             @Override public void onStartTrackingTouch(SeekBar s) {}
             @Override public void onStopTrackingTouch(SeekBar s) {
                 settings.setQuality(s.getProgress());
+                recomputeSummary();
             }
         });
 
-        checkSkipFav.setOnCheckedChangeListener((b, checked) -> settings.setSkipFavorites(checked));
+        checkSkipFav.setOnCheckedChangeListener((b, checked) -> {
+            settings.setSkipFavorites(checked);
+            recomputeSummary();
+        });
+
+        btnDateFrom.setOnClickListener(v -> pickDate(true));
+        btnDateTo.setOnClickListener(v -> pickDate(false));
 
         btnPreview.setOnClickListener(v -> openPreview());
         btnOrganize.setOnClickListener(v -> startOrganize());
         btnStop.setOnClickListener(v -> OrganizeService.stop(this));
+
+        setRangeControlsEnabled(false);
+        updateDateLabels();
     }
 
     private void applySavedSettings() {
@@ -227,23 +252,175 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private void applyFolder() {
         txtFolder.setText(displayName != null ? displayName
                 : (relPath != null ? relPath : getString(R.string.no_folder_selected)));
-        refreshStats();
+        loadFolder();
     }
 
-    private void refreshStats() {
+    /** Gathers the folder's images once, then derives stats, the date span, and the plan summary. */
+    private void loadFolder() {
         if (relPath == null && dataDir == null) {
             txtStats.setText(R.string.no_folder_selected);
+            txtPlan.setText("");
             return;
         }
+        allImages = null;
         txtStats.setText(R.string.counting);
+        txtPlan.setText("");
+        setRangeControlsEnabled(false);
         final String rel = relPath, dir = dataDir;
         executor.execute(() -> {
-            final int count = repo.countInFolder(rel, dir);
-            main.post(() -> txtStats.setText(getString(R.string.photos_count_size,
-                    count, getString(R.string.calculating_size))));
-            final FolderStats st = repo.statsForFolder(rel, dir);
-            main.post(() -> txtStats.setText(getString(R.string.photos_count_size,
-                    st.count, Formatter.humanReadableBytes(st.totalBytes))));
+            final List<MediaImage> imgs = new ArrayList<>();
+            repo.forEachNewestFirst(rel, dir, img -> {
+                imgs.add(img);
+                return true;
+            });
+            long sum = 0, min = Long.MAX_VALUE, max = Long.MIN_VALUE;
+            for (MediaImage m : imgs) {
+                sum += m.size;
+                if (m.dateTakenMillis > 0) {
+                    min = Math.min(min, m.dateTakenMillis);
+                    max = Math.max(max, m.dateTakenMillis);
+                }
+            }
+            final long fSum = sum;
+            final long fMin = (min == Long.MAX_VALUE) ? 0 : min;
+            final long fMax = (max == Long.MIN_VALUE) ? 0 : max;
+            main.post(() -> {
+                if (!sameFolder(rel, dir)) return;
+                allImages = imgs;
+                txtStats.setText(getString(R.string.photos_count_size,
+                        imgs.size(), Formatter.humanReadableBytes(fSum)));
+                folderMinDate = fMin;
+                folderMaxDate = fMax;
+                rangeFrom = fMin > 0 ? startOfDay(fMin) : Long.MIN_VALUE;
+                rangeTo = fMax > 0 ? endOfDay(fMax) : Long.MAX_VALUE;
+                updateDateLabels();
+                setRangeControlsEnabled(fMin > 0);
+                recomputeSummary();
+            });
+        });
+    }
+
+    private boolean sameFolder(String rel, String dir) {
+        return eq(rel, relPath) && eq(dir, dataDir);
+    }
+
+    private static boolean eq(String a, String b) {
+        return a == null ? b == null : a.equals(b);
+    }
+
+    // ---- Date range ---------------------------------------------------------
+
+    private void setRangeControlsEnabled(boolean enabled) {
+        btnDateFrom.setEnabled(enabled);
+        btnDateTo.setEnabled(enabled);
+    }
+
+    private void updateDateLabels() {
+        if (folderMinDate <= 0) {
+            btnDateFrom.setText(getString(R.string.date_from_label, "—"));
+            btnDateTo.setText(getString(R.string.date_to_label, "—"));
+            return;
+        }
+        btnDateFrom.setText(getString(R.string.date_from_label, formatDay(rangeFrom)));
+        btnDateTo.setText(getString(R.string.date_to_label, formatDay(rangeTo)));
+    }
+
+    private static String formatDay(long millis) {
+        return DateFormat.getDateInstance(DateFormat.MEDIUM).format(new Date(millis));
+    }
+
+    private static long startOfDay(long millis) {
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(millis);
+        c.set(Calendar.HOUR_OF_DAY, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
+    }
+
+    private static long endOfDay(long millis) {
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(millis);
+        c.set(Calendar.HOUR_OF_DAY, 23);
+        c.set(Calendar.MINUTE, 59);
+        c.set(Calendar.SECOND, 59);
+        c.set(Calendar.MILLISECOND, 999);
+        return c.getTimeInMillis();
+    }
+
+    private void pickDate(boolean isFrom) {
+        long base = isFrom ? rangeFrom : rangeTo;
+        if (base == Long.MIN_VALUE || base == Long.MAX_VALUE || base <= 0) {
+            base = (isFrom ? folderMinDate : folderMaxDate);
+        }
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(base > 0 ? base : System.currentTimeMillis());
+        DatePickerDialog dlg = new DatePickerDialog(this, (view, year, month, day) -> {
+            Calendar picked = Calendar.getInstance();
+            picked.set(year, month, day, 12, 0, 0);
+            long val = picked.getTimeInMillis();
+            if (isFrom) {
+                rangeFrom = startOfDay(val);
+                if (rangeTo < rangeFrom) rangeTo = endOfDay(val);
+            } else {
+                rangeTo = endOfDay(val);
+                if (rangeFrom > rangeTo) rangeFrom = startOfDay(val);
+            }
+            updateDateLabels();
+            recomputeSummary();
+        }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH));
+        dlg.show();
+    }
+
+    private List<MediaImage> imagesInRange() {
+        DateRange r = new DateRange(rangeFrom, rangeTo);
+        List<MediaImage> inRange = new ArrayList<>();
+        if (allImages != null) {
+            for (MediaImage m : allImages) {
+                if (r.contains(m.dateTakenMillis)) inRange.add(m);
+            }
+        }
+        return inRange;
+    }
+
+    // ---- Plan summary -------------------------------------------------------
+
+    private void recomputeSummary() {
+        if (allImages == null) {
+            txtPlan.setText("");
+            return;
+        }
+        final List<MediaImage> inRange = imagesInRange();
+        final int count = inRange.size();
+        final CompressMode mode = currentMode();
+        final int quality = seekQuality.getProgress();
+        final boolean skipFav = checkSkipFav.isChecked() && Sdk.atLeastR();
+        final int gen = ++summaryGen;
+
+        if (count == 0) {
+            txtPlan.setText(getString(R.string.plan_summary_exact, 0,
+                    Formatter.humanReadableBytes(0)));
+            return;
+        }
+        if (!mode.recompresses()) {
+            long total = 0;
+            for (MediaImage m : inRange) total += m.size;
+            txtPlan.setText(getString(R.string.plan_summary_exact, count,
+                    Formatter.humanReadableBytes(total)));
+            return;
+        }
+        txtPlan.setText(getString(R.string.plan_estimating, count));
+        final Recompressor rc = new Recompressor(this, repo);
+        executor.execute(() -> {
+            long est = SizeEstimator.estimateTotal(
+                    inRange, mode, quality, skipFav, rc, () -> gen != summaryGen);
+            main.post(() -> {
+                if (gen == summaryGen) {
+                    txtPlan.setText(getString(R.string.plan_summary_estimated, count,
+                            Formatter.humanReadableBytes(est)));
+                }
+            });
         });
     }
 
@@ -266,6 +443,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         i.putExtra(Extras.MODE, currentMode().name());
         i.putExtra(Extras.QUALITY, seekQuality.getProgress());
         i.putExtra(Extras.SKIP_FAV, checkSkipFav.isChecked() && Sdk.atLeastR());
+        i.putExtra(Extras.DATE_FROM, rangeFrom);
+        i.putExtra(Extras.DATE_TO, rangeTo);
     }
 
     // ---- Organize -----------------------------------------------------------
@@ -278,19 +457,19 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (OrganizeService.RUNNING) {
             return;
         }
+        if (allImages == null) {
+            toast(R.string.counting);
+            return;
+        }
+        // Reuse the cached folder listing, scoped to the selected date range.
+        final List<MediaImage> imgs = imagesInRange();
+        if (imgs.isEmpty()) {
+            toast(R.string.no_photos);
+            return;
+        }
         setBusy(true);
-        final CompressMode mode = currentMode();
-        final int quality = seekQuality.getProgress();
-        final boolean skipFav = checkSkipFav.isChecked() && Sdk.atLeastR();
-        final String rel = relPath, dir = dataDir;
-        executor.execute(() -> {
-            final List<MediaImage> imgs = new ArrayList<>();
-            repo.forEachNewestFirst(rel, dir, img -> {
-                imgs.add(img);
-                return true;
-            });
-            main.post(() -> onImagesGathered(imgs, mode, quality, skipFav, rel, dir));
-        });
+        onImagesGathered(imgs, currentMode(), seekQuality.getProgress(),
+                checkSkipFav.isChecked() && Sdk.atLeastR(), relPath, dataDir);
     }
 
     private void onImagesGathered(List<MediaImage> imgs, CompressMode mode, int quality,
@@ -417,7 +596,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         progressBar.setProgress(100);
         pendingImages = null;
         consentQueue = null;
-        refreshStats();
+        loadFolder();
     }
 
     // ---- Activity results ---------------------------------------------------

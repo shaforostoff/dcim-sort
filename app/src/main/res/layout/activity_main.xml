@@ -109,6 +109,47 @@
             android:layout_marginTop="8dp"
             android:text="@string/skip_favorites" />
 
+        <!-- Date range -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/date_range_label"
+            android:textAllCaps="true"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_date_from"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text="@string/date_from_label" />
+
+            <Button
+                android:id="@+id/btn_date_to"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="@string/date_to_label" />
+        </LinearLayout>
+
+        <!-- Plan summary -->
+        <TextView
+            android:id="@+id/txt_plan"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
         <!-- Action buttons -->
         <LinearLayout
             android:layout_width="match_parent"
