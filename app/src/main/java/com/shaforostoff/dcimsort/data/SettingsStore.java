@@ -1,0 +1,61 @@
+package com.shaforostoff.dcimsort.data;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+/** Persists the selected source folder and compression settings across app restarts. */
+public class SettingsStore {
+    private static final String PREFS = "dcimsort_settings";
+
+    private static final String K_REL_PATH = "source_relative_path";
+    private static final String K_BUCKET_ID = "source_bucket_id";
+    private static final String K_DISPLAY = "source_display_name";
+    private static final String K_DATA_PATH = "source_data_path";
+    private static final String K_MODE = "compress_mode";
+    private static final String K_QUALITY = "quality";
+    private static final String K_SKIP_FAV = "skip_favorites";
+
+    private final SharedPreferences prefs;
+
+    public SettingsStore(Context ctx) {
+        prefs = ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    public boolean hasSourceFolder() {
+        return prefs.contains(K_REL_PATH) || prefs.contains(K_DATA_PATH);
+    }
+
+    public void setSourceFolder(String relativePath, long bucketId, String displayName, String dataPath) {
+        prefs.edit()
+                .putString(K_REL_PATH, relativePath)
+                .putLong(K_BUCKET_ID, bucketId)
+                .putString(K_DISPLAY, displayName)
+                .putString(K_DATA_PATH, dataPath)
+                .apply();
+    }
+
+    public String getRelativePath() { return prefs.getString(K_REL_PATH, null); }
+    public long getBucketId() { return prefs.getLong(K_BUCKET_ID, -1); }
+    public String getDisplayName() { return prefs.getString(K_DISPLAY, null); }
+    public String getDataPath() { return prefs.getString(K_DATA_PATH, null); }
+
+    public CompressMode getMode() {
+        return CompressMode.fromName(prefs.getString(K_MODE, CompressMode.NONE.name()), CompressMode.NONE);
+    }
+
+    public void setMode(CompressMode mode) {
+        prefs.edit().putString(K_MODE, mode.name()).apply();
+    }
+
+    public int getQuality() { return prefs.getInt(K_QUALITY, 80); }
+
+    public void setQuality(int quality) {
+        prefs.edit().putInt(K_QUALITY, Math.max(0, Math.min(100, quality))).apply();
+    }
+
+    public boolean getSkipFavorites() { return prefs.getBoolean(K_SKIP_FAV, false); }
+
+    public void setSkipFavorites(boolean skip) {
+        prefs.edit().putBoolean(K_SKIP_FAV, skip).apply();
+    }
+}

@@ -1,0 +1,52 @@
+<resources>
+    <string name="app_name">DCIM Sort</string>
+
+    <!-- Screen titles -->
+    <string name="title_pick_folder">Select folder</string>
+    <string name="title_preview">Preview</string>
+
+    <!-- Main screen -->
+    <string name="browse">Browse…</string>
+    <string name="no_folder_selected">No folder selected</string>
+    <string name="counting">Counting…</string>
+    <string name="calculating_size">calculating size…</string>
+    <string name="photos_count_size">%1$d photos · %2$s</string>
+    <string name="photos_count_only">%1$d photos</string>
+
+    <string name="recompress_label">Recompression</string>
+    <string name="mode_none">Do not recompress</string>
+    <string name="mode_webp">WebP</string>
+    <string name="mode_heic">HEIC</string>
+    <string name="quality_label">Quality: %1$d</string>
+    <string name="skip_favorites">Do not compress photos marked as favorite</string>
+
+    <string name="preview">Preview</string>
+    <string name="organize">Organize</string>
+    <string name="stop">Stop</string>
+
+    <!-- Permissions -->
+    <string name="need_media_permission">Storage/photos permission is required to read your images.</string>
+    <string name="need_media_location">Allow media location to read photo GPS for place names.</string>
+    <string name="grant">Grant</string>
+
+    <!-- Progress -->
+    <string name="organizing_progress">%1$d / %2$d · %3$s</string>
+    <string name="organize_notification_title">Organizing photos</string>
+    <string name="organize_channel_name">Organize progress</string>
+    <string name="organize_done">Done: %1$d moved, %2$d skipped, %3$d failed</string>
+    <string name="organize_stopped">Stopped</string>
+
+    <!-- Preview list -->
+    <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>
+    <string name="estimating">estimating…</string>
+    <string name="preview_empty">No photos to organize.</string>
+
+    <!-- Viewer -->
+    <string name="compare_overlay">%1$s → %2$s</string>
+    <string name="hold_to_compare">Hold to compare compressed</string>
+
+    <!-- Misc -->
+    <string name="unknown_place">Unknown</string>
+    <string name="select_folder_first">Select a folder first.</string>
+    <string name="no_photos">No photos in this folder.</string>
+</resources>

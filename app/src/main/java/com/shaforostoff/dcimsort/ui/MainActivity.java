@@ -1,0 +1,483 @@
+package com.shaforostoff.dcimsort.ui;
+
+import android.app.Activity;
+import android.app.PendingIntent;
+import android.content.ContentResolver;
+import android.content.Intent;
+import android.content.IntentSender;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.MediaStore;
+import android.view.View;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
+import android.widget.SeekBar;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.shaforostoff.dcimsort.R;
+import com.shaforostoff.dcimsort.data.Bucket;
+import com.shaforostoff.dcimsort.data.CompressMode;
+import com.shaforostoff.dcimsort.data.FolderStats;
+import com.shaforostoff.dcimsort.data.MediaImage;
+import com.shaforostoff.dcimsort.data.MediaRepository;
+import com.shaforostoff.dcimsort.data.SettingsStore;
+import com.shaforostoff.dcimsort.util.Formatter;
+import com.shaforostoff.dcimsort.util.PermissionManager;
+import com.shaforostoff.dcimsort.util.Sdk;
+import com.shaforostoff.dcimsort.work.OrganizeRequest;
+import com.shaforostoff.dcimsort.work.OrganizeService;
+import com.shaforostoff.dcimsort.work.Recompressor;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class MainActivity extends Activity implements OrganizeService.Listener {
+
+    private static final int REQ_PERMISSIONS = 10;
+    private static final int REQ_PICK_FOLDER = 11;
+    private static final int REQ_CONSENT = 12;
+    private static final int CONSENT_CHUNK = 480;
+
+    private static final int CONSENT_WRITE = 0;
+    private static final int CONSENT_DELETE = 1;
+
+    private SettingsStore settings;
+    private MediaRepository repo;
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Handler main = new Handler(Looper.getMainLooper());
+
+    // Views
+    private TextView txtFolder, txtStats, txtQuality, txtProgress;
+    private RadioGroup radioMode;
+    private RadioButton radioNone, radioWebp, radioHeic;
+    private LinearLayout qualityGroup, progressGroup;
+    private SeekBar seekQuality;
+    private CheckBox checkSkipFav;
+    private Button btnPreview, btnOrganize, btnStop, btnBrowse;
+    private ProgressBar progressBar;
+
+    // Current folder
+    private String relPath, dataDir, displayName;
+    private long bucketId = -1;
+
+    // Pending organize job + consent queue
+    private List<MediaImage> pendingImages;
+    private CompressMode pendingMode;
+    private int pendingQuality;
+    private boolean pendingSkipFav;
+    private String pendingRel, pendingDir;
+    private List<ConsentStep> consentQueue;
+    private int consentIndex;
+
+    private static final class ConsentStep {
+        final int type;
+        final List<Uri> uris;
+        ConsentStep(int type, List<Uri> uris) { this.type = type; this.uris = uris; }
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        settings = new SettingsStore(this);
+        repo = new MediaRepository(this);
+
+        bindViews();
+        setupControls();
+        applySavedSettings();
+
+        if (PermissionManager.hasReadMedia(this)) {
+            initFolder();
+        } else {
+            requestNeededPermissions();
+            txtStats.setText(R.string.need_media_permission);
+        }
+    }
+
+    private void bindViews() {
+        btnBrowse = findViewById(R.id.btn_browse);
+        txtFolder = findViewById(R.id.txt_folder);
+        txtStats = findViewById(R.id.txt_stats);
+        radioMode = findViewById(R.id.radio_mode);
+        radioNone = findViewById(R.id.radio_none);
+        radioWebp = findViewById(R.id.radio_webp);
+        radioHeic = findViewById(R.id.radio_heic);
+        qualityGroup = findViewById(R.id.quality_group);
+        txtQuality = findViewById(R.id.txt_quality);
+        seekQuality = findViewById(R.id.seek_quality);
+        checkSkipFav = findViewById(R.id.check_skip_fav);
+        btnPreview = findViewById(R.id.btn_preview);
+        btnOrganize = findViewById(R.id.btn_organize);
+        progressGroup = findViewById(R.id.progress_group);
+        progressBar = findViewById(R.id.progress_bar);
+        txtProgress = findViewById(R.id.txt_progress);
+        btnStop = findViewById(R.id.btn_stop);
+    }
+
+    private void setupControls() {
+        btnBrowse.setOnClickListener(v -> {
+            if (!PermissionManager.hasReadMedia(this)) {
+                requestNeededPermissions();
+                return;
+            }
+            startActivityForResult(new Intent(this, FolderPickerActivity.class), REQ_PICK_FOLDER);
+        });
+
+        // HEIC only when the device can encode it.
+        if (!Recompressor.hasHeicEncoder()) {
+            radioHeic.setVisibility(View.GONE);
+        }
+        // Favorites skip only on Android 11+.
+        if (!Sdk.atLeastR()) {
+            checkSkipFav.setVisibility(View.GONE);
+        }
+
+        radioMode.setOnCheckedChangeListener((group, checkedId) -> {
+            CompressMode mode = currentMode();
+            settings.setMode(mode);
+            qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
+        });
+
+        seekQuality.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
+                txtQuality.setText(getString(R.string.quality_label, progress));
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {
+                settings.setQuality(s.getProgress());
+            }
+        });
+
+        checkSkipFav.setOnCheckedChangeListener((b, checked) -> settings.setSkipFavorites(checked));
+
+        btnPreview.setOnClickListener(v -> openPreview());
+        btnOrganize.setOnClickListener(v -> startOrganize());
+        btnStop.setOnClickListener(v -> OrganizeService.stop(this));
+    }
+
+    private void applySavedSettings() {
+        CompressMode mode = settings.getMode();
+        if (mode == CompressMode.HEIC && !Recompressor.hasHeicEncoder()) {
+            mode = CompressMode.NONE;
+        }
+        switch (mode) {
+            case WEBP: radioWebp.setChecked(true); break;
+            case HEIC: radioHeic.setChecked(true); break;
+            default: radioNone.setChecked(true); break;
+        }
+        qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
+        int q = settings.getQuality();
+        seekQuality.setProgress(q);
+        txtQuality.setText(getString(R.string.quality_label, q));
+        checkSkipFav.setChecked(settings.getSkipFavorites());
+    }
+
+    private CompressMode currentMode() {
+        int id = radioMode.getCheckedRadioButtonId();
+        if (id == R.id.radio_webp) return CompressMode.WEBP;
+        if (id == R.id.radio_heic) return CompressMode.HEIC;
+        return CompressMode.NONE;
+    }
+
+    // ---- Folder + stats -----------------------------------------------------
+
+    private void initFolder() {
+        if (settings.hasSourceFolder()) {
+            relPath = settings.getRelativePath();
+            dataDir = settings.getDataPath();
+            displayName = settings.getDisplayName();
+            bucketId = settings.getBucketId();
+            applyFolder();
+        } else {
+            txtStats.setText(R.string.counting);
+            executor.execute(() -> {
+                final Bucket b = repo.findDefaultCameraBucket();
+                main.post(() -> {
+                    if (b != null) {
+                        setFolder(b.relativePath, b.dataDir, b.displayName, b.id);
+                    } else {
+                        txtFolder.setText(R.string.no_folder_selected);
+                        txtStats.setText(R.string.no_photos);
+                    }
+                });
+            });
+        }
+    }
+
+    private void setFolder(String rel, String dir, String display, long id) {
+        relPath = rel;
+        dataDir = dir;
+        displayName = display;
+        bucketId = id;
+        settings.setSourceFolder(rel, id, display, dir);
+        applyFolder();
+    }
+
+    private void applyFolder() {
+        txtFolder.setText(displayName != null ? displayName
+                : (relPath != null ? relPath : getString(R.string.no_folder_selected)));
+        refreshStats();
+    }
+
+    private void refreshStats() {
+        if (relPath == null && dataDir == null) {
+            txtStats.setText(R.string.no_folder_selected);
+            return;
+        }
+        txtStats.setText(R.string.counting);
+        final String rel = relPath, dir = dataDir;
+        executor.execute(() -> {
+            final int count = repo.countInFolder(rel, dir);
+            main.post(() -> txtStats.setText(getString(R.string.photos_count_size,
+                    count, getString(R.string.calculating_size))));
+            final FolderStats st = repo.statsForFolder(rel, dir);
+            main.post(() -> txtStats.setText(getString(R.string.photos_count_size,
+                    st.count, Formatter.humanReadableBytes(st.totalBytes))));
+        });
+    }
+
+    // ---- Preview ------------------------------------------------------------
+
+    private void openPreview() {
+        if (relPath == null && dataDir == null) {
+            toast(R.string.select_folder_first);
+            return;
+        }
+        Intent i = new Intent(this, PreviewActivity.class);
+        putFolderExtras(i);
+        startActivity(i);
+    }
+
+    private void putFolderExtras(Intent i) {
+        i.putExtra(Extras.REL_PATH, relPath);
+        i.putExtra(Extras.DATA_DIR, dataDir);
+        i.putExtra(Extras.DISPLAY, displayName);
+        i.putExtra(Extras.MODE, currentMode().name());
+        i.putExtra(Extras.QUALITY, seekQuality.getProgress());
+        i.putExtra(Extras.SKIP_FAV, checkSkipFav.isChecked() && Sdk.atLeastR());
+    }
+
+    // ---- Organize -----------------------------------------------------------
+
+    private void startOrganize() {
+        if (relPath == null && dataDir == null) {
+            toast(R.string.select_folder_first);
+            return;
+        }
+        if (OrganizeService.RUNNING) {
+            return;
+        }
+        setBusy(true);
+        final CompressMode mode = currentMode();
+        final int quality = seekQuality.getProgress();
+        final boolean skipFav = checkSkipFav.isChecked() && Sdk.atLeastR();
+        final String rel = relPath, dir = dataDir;
+        executor.execute(() -> {
+            final List<MediaImage> imgs = new ArrayList<>();
+            repo.forEachNewestFirst(rel, dir, img -> {
+                imgs.add(img);
+                return true;
+            });
+            main.post(() -> onImagesGathered(imgs, mode, quality, skipFav, rel, dir));
+        });
+    }
+
+    private void onImagesGathered(List<MediaImage> imgs, CompressMode mode, int quality,
+                                  boolean skipFav, String rel, String dir) {
+        if (imgs.isEmpty()) {
+            setBusy(false);
+            toast(R.string.no_photos);
+            return;
+        }
+        pendingImages = imgs;
+        pendingMode = mode;
+        pendingQuality = quality;
+        pendingSkipFav = skipFav;
+        pendingRel = rel;
+        pendingDir = dir;
+
+        if (Sdk.atLeastR()) {
+            buildConsentQueue(imgs, mode, skipFav);
+            consentIndex = 0;
+            processNextConsent();
+        } else {
+            launchService();
+        }
+    }
+
+    private void buildConsentQueue(List<MediaImage> imgs, CompressMode mode, boolean skipFav) {
+        consentQueue = new ArrayList<>();
+        List<Uri> writeUris = new ArrayList<>();
+        List<Uri> deleteUris = new ArrayList<>();
+        if (!mode.recompresses()) {
+            for (MediaImage m : imgs) writeUris.add(m.contentUri());
+        } else {
+            for (MediaImage m : imgs) {
+                if (skipFav && m.favorite) writeUris.add(m.contentUri());
+                else deleteUris.add(m.contentUri());
+            }
+        }
+        addChunks(CONSENT_WRITE, writeUris);
+        addChunks(CONSENT_DELETE, deleteUris);
+    }
+
+    private void addChunks(int type, List<Uri> uris) {
+        for (int i = 0; i < uris.size(); i += CONSENT_CHUNK) {
+            consentQueue.add(new ConsentStep(type,
+                    new ArrayList<>(uris.subList(i, Math.min(i + CONSENT_CHUNK, uris.size())))));
+        }
+    }
+
+    private void processNextConsent() {
+        if (consentQueue == null || consentIndex >= consentQueue.size()) {
+            launchService();
+            return;
+        }
+        ConsentStep step = consentQueue.get(consentIndex);
+        ContentResolver resolver = getContentResolver();
+        PendingIntent pi;
+        try {
+            if (step.type == CONSENT_WRITE) {
+                pi = MediaStore.createWriteRequest(resolver, step.uris);
+            } else {
+                pi = MediaStore.createDeleteRequest(resolver, step.uris);
+            }
+            startIntentSenderForResult(pi.getIntentSender(), REQ_CONSENT, null, 0, 0, 0);
+        } catch (IntentSender.SendIntentException | RuntimeException e) {
+            setBusy(false);
+            toast(R.string.organize_stopped);
+        }
+    }
+
+    private void launchService() {
+        OrganizeRequest req = new OrganizeRequest();
+        req.images = pendingImages;
+        req.mode = pendingMode;
+        req.quality = pendingQuality;
+        req.skipFavorites = pendingSkipFav;
+        req.sourceRelativePath = pendingRel;
+        req.sourceDataDir = pendingDir;
+        OrganizeRequest.set(req);
+
+        progressGroup.setVisibility(View.VISIBLE);
+        progressBar.setProgress(0);
+        txtProgress.setText(getString(R.string.organizing_progress, 0, pendingImages.size(), ""));
+        OrganizeService.start(this);
+    }
+
+    private void setBusy(boolean busy) {
+        btnOrganize.setEnabled(!busy);
+        btnPreview.setEnabled(!busy);
+        btnBrowse.setEnabled(!busy);
+    }
+
+    // ---- Progress listener --------------------------------------------------
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        OrganizeService.setListener(this);
+        if (OrganizeService.RUNNING) {
+            setBusy(true);
+            progressGroup.setVisibility(View.VISIBLE);
+            onProgress(OrganizeService.P_DONE, OrganizeService.P_TOTAL, OrganizeService.P_FOLDER);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        OrganizeService.setListener(null);
+    }
+
+    @Override
+    public void onProgress(int done, int total, String folder) {
+        progressGroup.setVisibility(View.VISIBLE);
+        progressBar.setProgress(total > 0 ? (int) (done * 100L / total) : 0);
+        txtProgress.setText(getString(R.string.organizing_progress, done, total,
+                folder == null ? "" : folder));
+    }
+
+    @Override
+    public void onDone(int moved, int skipped, int failed, boolean stopped) {
+        setBusy(false);
+        txtProgress.setText(stopped ? getString(R.string.organize_stopped)
+                : getString(R.string.organize_done, moved, skipped, failed));
+        progressBar.setProgress(100);
+        pendingImages = null;
+        consentQueue = null;
+        refreshStats();
+    }
+
+    // ---- Activity results ---------------------------------------------------
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PICK_FOLDER) {
+            if (resultCode == RESULT_OK && data != null) {
+                setFolder(
+                        data.getStringExtra(Extras.RESULT_REL_PATH),
+                        data.getStringExtra(Extras.RESULT_DATA_DIR),
+                        data.getStringExtra(Extras.RESULT_DISPLAY),
+                        data.getLongExtra(Extras.RESULT_BUCKET_ID, -1));
+            }
+        } else if (requestCode == REQ_CONSENT) {
+            if (resultCode == RESULT_OK) {
+                consentIndex++;
+                processNextConsent();
+            } else {
+                setBusy(false);
+                pendingImages = null;
+                consentQueue = null;
+                toast(R.string.organize_stopped);
+            }
+        }
+    }
+
+    // ---- Permissions --------------------------------------------------------
+
+    private void requestNeededPermissions() {
+        List<String> req = new ArrayList<>();
+        for (String p : PermissionManager.missing(this)) req.add(p);
+        if (PermissionManager.needsNotificationPermission(this)) {
+            req.add(android.Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (!req.isEmpty()) {
+            requestPermissions(req.toArray(new String[0]), REQ_PERMISSIONS);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_PERMISSIONS) {
+            if (PermissionManager.hasReadMedia(this)) {
+                initFolder();
+            } else {
+                txtStats.setText(R.string.need_media_permission);
+            }
+        }
+    }
+
+    private void toast(int resId) {
+        Toast.makeText(this, resId, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        executor.shutdownNow();
+    }
+}
