@@ -1,5 +1,7 @@
 Copyright (c) Mykola Shaforostov
 
+https://github.com/shaforostoff/dcim-sort
+
 This application is licensed under GPLv3 and uses the following open source libraries:
 
 jpegli:  BSD 3-Clause / Copyright (c) the JPEG XL Project Authors. All rights reserved.
