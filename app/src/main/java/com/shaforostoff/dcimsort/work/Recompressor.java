@@ -144,6 +144,10 @@ public class Recompressor {
         if (mode == CompressMode.AVIF && NativeCodecs.avifAvailable()) {
             return compressAvifNative(source, quality);
         }
+        // Full flavor: JPEG goes through jpegli; UltraHDR gain map is preserved when present.
+        if (mode == CompressMode.JPEG && NativeCodecs.jpegliAvailable()) {
+            return compressJpegNative(source, quality);
+        }
         Bitmap bmp = decodeOriented(source, MAX_LONG_SIDE);
         if (bmp == null) return null;
         File out = null;
@@ -191,6 +195,49 @@ public class Recompressor {
                 out.delete();
                 return null;
             }
+            return out;
+        } catch (IOException e) {
+            if (out != null) out.delete();
+            return null;
+        } finally {
+            base.recycle();
+        }
+    }
+
+    /**
+     * Full-flavor JPEG path: encodes with jpegli and, when the source carries a UltraHDR gain map,
+     * produces a JPEG_R (JPEG + gainmap stitched via MPF) with EXIF embedded during encode so the
+     * MPF offsets are not disturbed by post-encode ExifInterface writes. Falls back to plain JPEG
+     * with normal EXIF re-injection when no gain map is present.
+     */
+    private File compressJpegNative(Uri source, int quality) {
+        Bitmap base = decodeOriented(source, MAX_LONG_SIDE);
+        if (base == null) return null;
+        File out = null;
+        try {
+            out = File.createTempFile("cmp_", ".jpg", ctx.getCacheDir());
+            // Attempt JPEG_R when the decoded bitmap carries a UltraHDR gain map.
+            if (Sdk.atLeastBaklava() && base.hasGainmap()) {
+                Gainmap g = base.getGainmap();
+                if (g != null) {
+                    Bitmap gainmapContents = g.getGainmapContents();
+                    if (gainmapContents != null) {
+                        GainmapMeta meta = toGainmapMeta(g);
+                        byte[] exifTiff = buildExifTiffBlock(readSourceExif(source));
+                        boolean ok = NativeCodecs.encodeJpegR(base, gainmapContents, meta,
+                                quality, exifTiff, out);
+                        if (ok) return out;
+                        // Fall through to plain JPEG if JPEG_R encoding fails.
+                    }
+                }
+            }
+            // Plain JPEG: encode then re-inject EXIF via ExifInterface.
+            boolean ok = NativeCodecs.encodeJpeg(base, quality, out);
+            if (!ok) {
+                out.delete();
+                return null;
+            }
+            reinjectExif(source, out, CompressMode.JPEG);
             return out;
         } catch (IOException e) {
             if (out != null) out.delete();

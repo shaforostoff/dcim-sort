@@ -72,6 +72,26 @@ public final class NativeCodecs {
         }
     }
 
+    /**
+     * Encodes a UltraHDR JPEG (JPEG_R): primary base JPEG + gainmap JPEG stitched with MPF and
+     * XMP (hdrgm namespace). EXIF is embedded during encode so MPF offsets stay stable.
+     *
+     * @param gainmap  gainmap contents bitmap (RGBA_8888 or ALPHA_8).
+     * @param meta     gainmap metadata; must not be null.
+     * @param exifTiff optional raw TIFF/Exif block to embed; null to omit.
+     */
+    public static boolean encodeJpegR(Bitmap base, Bitmap gainmap, GainmapMeta meta,
+                                      int quality, byte[] exifTiff, File out) {
+        if (!LOADED || base == null || gainmap == null || meta == null || out == null) return false;
+        try {
+            return nativeEncodeJpegR(base, gainmap, meta, quality, exifTiff,
+                    out.getAbsolutePath());
+        } catch (Throwable t) {
+            Log.e(TAG, "JPEG_R encode failed", t);
+            return false;
+        }
+    }
+
     private static native boolean nativeAvifAvailable();
 
     private static native boolean nativeEncodeAvif(Bitmap base, Bitmap gainmapContents,
@@ -79,4 +99,7 @@ public final class NativeCodecs {
                                                    String outPath);
 
     private static native boolean nativeEncodeJpeg(Bitmap base, int quality, String outPath);
+
+    private static native boolean nativeEncodeJpegR(Bitmap base, Bitmap gainmap, GainmapMeta meta,
+                                                    int quality, byte[] exifTiff, String outPath);
 }

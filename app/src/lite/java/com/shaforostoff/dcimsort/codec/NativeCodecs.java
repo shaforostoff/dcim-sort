@@ -35,4 +35,9 @@ public final class NativeCodecs {
     public static boolean encodeJpeg(Bitmap base, int quality, File out) {
         return false;
     }
+
+    public static boolean encodeJpegR(Bitmap base, Bitmap gainmap, GainmapMeta meta,
+                                      int quality, byte[] exifTiff, File out) {
+        return false;
+    }
 }
