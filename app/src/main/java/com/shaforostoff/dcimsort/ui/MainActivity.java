@@ -597,6 +597,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         OrganizeRequest.set(req);
 
         progressGroup.setVisibility(View.VISIBLE);
+        btnStop.setVisibility(View.VISIBLE);
         progressBar.setProgress(0);
         txtProgress.setText(getString(R.string.organizing_progress, 0, pendingImages.size(), ""));
         OrganizeService.start(this);
@@ -643,6 +644,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         txtProgress.setText(stopped ? getString(R.string.organize_stopped)
                 : getString(R.string.organize_done, moved, skipped, failed));
         progressBar.setProgress(100);
+        btnStop.setVisibility(View.GONE);
+        SelectionStore.clear();
         pendingImages = null;
         consentQueue = null;
         loadFolder();
