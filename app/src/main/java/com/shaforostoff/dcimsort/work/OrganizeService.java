@@ -23,7 +23,6 @@ import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.util.ThreadPlanner;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Future;
@@ -143,7 +142,7 @@ public class OrganizeService extends Service {
                         Mover.Outcome o = mover.move(img, req.sourceRelativePath, folder);
                         if (o == Mover.Outcome.MOVED) moved.incrementAndGet();
                         else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
-                        else { failed.incrementAndGet(); writeDebugLog("FAILED move: " + img.contentUri() + " relPath=" + img.relativePath + " folder=" + folder); }
+                        else failed.incrementAndGet();
                     } else {
                         File temp = rc.compressToTemp(img.contentUri(), req.mode, req.quality);
                         boolean ok = false;
@@ -156,11 +155,11 @@ public class OrganizeService extends Service {
                             }
                         }
                         if (ok) moved.incrementAndGet();
-                        else { failed.incrementAndGet(); writeDebugLog("FAILED recompress: uri=" + img.contentUri() + " temp=" + (temp != null ? temp.length() : "null") + " folder=" + folder); }
+                        else failed.incrementAndGet();
                     }
                 } catch (Throwable t) {
                     failed.incrementAndGet();
-                    writeDebugLog(img.contentUri() + "\n" + android.util.Log.getStackTraceString(t));
+                    android.util.Log.e("DCIMSort", "organize error: " + img.contentUri(), t);
                 } finally {
                     int d = done.incrementAndGet();
                     publish(d, total, currentFolder, moved.get(), skipped.get(), failed.get());
@@ -212,16 +211,6 @@ public class OrganizeService extends Service {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nm != null) nm.notify(NOTI_ID, buildNotification(done, total, folder));
         }
-    }
-
-    private void writeDebugLog(String msg) {
-        try {
-            File f = new File(getFilesDir(), "organize_debug.txt");
-            try (FileWriter w = new FileWriter(f, true)) {
-                w.write(msg);
-                w.write("\n---\n");
-            }
-        } catch (Exception ignore) {}
     }
 
     private void finishService() {

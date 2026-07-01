@@ -15,7 +15,6 @@ import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.OutputStream;
 
@@ -140,7 +139,67 @@ public class Mover {
             newRel = "DCIM/Camera/" + folder + "/";
         }
         String newName = baseName(img.displayName) + Recompressor.extensionFor(mode);
+        Uri origUri = img.contentUri();
 
+        // Overwrite the original row in-place so the MediaStore row ID is preserved.
+        // Google Photos (and other apps) key per-photo metadata (captions, edits) by row ID;
+        // a delete+insert creates a new ID and permanently loses those associations.
+        //
+        // IMPORTANT: open the OutputStream BEFORE setting IS_PENDING=1.
+        // MediaStore only lets the file's original owner open a pending item's stream;
+        // we must acquire the stream while the row is still non-pending.
+        try {
+            // "rwt" = read-write-truncate: guarantees the old bytes are wiped before we write.
+            // Plain "w" on some MediaStore implementations silently skips the truncation.
+            OutputStream os = resolver().openOutputStream(origUri, "rwt");
+            if (os != null) {
+                // Got write access. Mark pending to hide the file from other apps during write.
+                ContentValues pendingCv = new ContentValues();
+                pendingCv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                resolver().update(origUri, pendingCv, null, null);
+                journal.begin(img.id, origUri);
+                boolean writeOk = false;
+                try {
+                    Log.d(TAG, "OVW writing tempSize=" + temp.length());
+                    writeFileTo(temp, os);
+                    writeOk = true;
+                } catch (Exception e) {
+                    Log.d(TAG,"OVW write failed: " + e);
+                } finally {
+                    try { os.close(); } catch (Exception ignore) {}
+                }
+                if (writeOk) {
+                    ContentValues doneCv = new ContentValues();
+                    doneCv.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                    doneCv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
+                    doneCv.put(MediaStore.MediaColumns.MIME_TYPE, Recompressor.mimeFor(mode));
+                    doneCv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
+                    doneCv.put(MediaStore.MediaColumns.SIZE, temp.length());
+                    resolver().update(origUri, doneCv, null, null);
+                    Log.d(TAG,"OVW success origUri=" + origUri + " -> " + newName);
+                    journal.complete(img.id);
+                    return true;
+                }
+                // Write failed; restore visibility of original file.
+                ContentValues clearCv = new ContentValues();
+                clearCv.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                try { resolver().update(origUri, clearCv, null, null); } catch (Exception ignore) {}
+                journal.abort(img.id);
+                // Fall through to insert path.
+            }
+        } catch (Exception e) {
+            Log.d(TAG,"OVW open failed: " + e);
+            // Fall through to insert path.
+        }
+
+        // Fallback: insert a new row and delete the original.
+        // Used when we cannot claim write access to the original row.
+        // Note: this path loses any per-row metadata (e.g. Google Photos captions).
+        return publishViaMediaStoreInsert(img, temp, mode, newRel, newName, volumeName);
+    }
+
+    private boolean publishViaMediaStoreInsert(MediaImage img, File temp, CompressMode mode,
+                                               String newRel, String newName, String volumeName) {
         ContentValues cv = new ContentValues();
         cv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
         cv.put(MediaStore.MediaColumns.MIME_TYPE, Recompressor.mimeFor(mode));
@@ -148,6 +207,9 @@ public class Mover {
         cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
         if (img.favorite && Sdk.atLeastR()) {
             cv.put(MediaStore.MediaColumns.IS_FAVORITE, 1);
+        }
+        if (img.description != null) {
+            cv.put(MediaStore.Images.ImageColumns.DESCRIPTION, img.description);
         }
 
         Uri insertUri = IMAGES;
@@ -159,10 +221,10 @@ public class Mover {
         try {
             newUri = resolver().insert(insertUri, cv);
         } catch (Exception e) {
-            debugLog("PUB insert threw: " + e);
+            Log.d(TAG,"INS insert threw: " + e);
             return false;
         }
-        if (newUri == null) { debugLog("PUB insert returned null"); return false; }
+        if (newUri == null) { Log.d(TAG,"INS insert returned null"); return false; }
 
         journal.begin(img.id, newUri);
         try {
@@ -175,7 +237,7 @@ public class Mover {
             resolver().update(newUri, done, null, null);
 
             if (!verify(newUri)) {
-                debugLog("PUB verify FAILED newUri=" + newUri);
+                Log.d(TAG,"INS verify FAILED newUri=" + newUri);
                 safeDelete(newUri);
                 journal.abort(img.id);
                 return false;
@@ -185,9 +247,9 @@ public class Mover {
             try {
                 int n = resolver().delete(img.contentUri(), null, null);
                 removed = (n > 0);
-                debugLog("PUB delete n=" + n + " orig=" + img.contentUri());
+                Log.d(TAG,"INS delete n=" + n + " orig=" + img.contentUri());
             } catch (Exception e) {
-                debugLog("PUB delete threw: " + e);
+                Log.d(TAG,"INS delete threw: " + e);
             }
             if (!removed && Sdk.atLeastQ()) {
                 try {
@@ -195,13 +257,13 @@ public class Mover {
                     trash.put(MediaStore.MediaColumns.IS_TRASHED, 1);
                     int n = resolver().update(img.contentUri(), trash, null, null);
                     removed = (n > 0);
-                    debugLog("PUB IS_TRASHED n=" + n + " orig=" + img.contentUri());
+                    Log.d(TAG,"INS IS_TRASHED n=" + n + " orig=" + img.contentUri());
                 } catch (Exception e) {
-                    debugLog("PUB IS_TRASHED threw: " + e);
+                    Log.d(TAG,"INS IS_TRASHED threw: " + e);
                 }
             }
             if (!removed) {
-                debugLog("PUB neither delete nor trash worked — rolling back newUri=" + newUri);
+                Log.d(TAG,"INS neither delete nor trash worked — rolling back newUri=" + newUri);
                 safeDelete(newUri);
                 journal.abort(img.id);
                 return false;
@@ -209,7 +271,7 @@ public class Mover {
             journal.complete(img.id);
             return true;
         } catch (Exception e) {
-            debugLog("PUB outer catch: " + e);
+            Log.d(TAG,"INS outer catch: " + e);
             safeDelete(newUri);
             journal.abort(img.id);
             return false;
@@ -264,15 +326,6 @@ public class Mover {
             MediaScannerConnection.scanFile(ctx, paths, null, null);
         } catch (Exception ignore) {
         }
-    }
-
-    private void debugLog(String msg) {
-        try {
-            File f = new File(ctx.getFilesDir(), "organize_debug.txt");
-            try (FileWriter w = new FileWriter(f, true)) {
-                w.write(msg + "\n");
-            }
-        } catch (Exception ignore) {}
     }
 
     private static void writeFileTo(File src, OutputStream out) throws IOException {

@@ -16,10 +16,11 @@ public class MediaImage {
     public final String mimeType;
     public final int width;
     public final int height;
+    public final String description;   // MediaStore DESCRIPTION; null if unset
 
     public MediaImage(long id, String displayName, String relativePath, String dataPath,
                       long dateTakenMillis, long size, boolean favorite, String mimeType,
-                      int width, int height) {
+                      int width, int height, String description) {
         this.id = id;
         this.displayName = displayName;
         this.relativePath = relativePath;
@@ -30,6 +31,7 @@ public class MediaImage {
         this.mimeType = mimeType;
         this.width = width;
         this.height = height;
+        this.description = description;
     }
 
     public Uri contentUri() {

@@ -190,6 +190,7 @@ public class MediaRepository {
         proj.add(MediaStore.MediaColumns.HEIGHT);
         if (Sdk.atLeastQ()) proj.add(MediaStore.MediaColumns.RELATIVE_PATH);
         if (Sdk.atLeastR()) proj.add(MediaStore.MediaColumns.IS_FAVORITE);
+        proj.add(MediaStore.Images.ImageColumns.DESCRIPTION);
 
         String sort = MediaStore.Images.Media.DATE_TAKEN + " DESC, "
                 + MediaStore.Images.Media.DATE_ADDED + " DESC";
@@ -207,6 +208,7 @@ public class MediaRepository {
             int iH = c.getColumnIndex(MediaStore.MediaColumns.HEIGHT);
             int iRel = c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH);
             int iFav = c.getColumnIndex(MediaStore.MediaColumns.IS_FAVORITE);
+            int iDesc = c.getColumnIndex(MediaStore.Images.ImageColumns.DESCRIPTION);
 
             while (c.moveToNext()) {
                 long id = iId >= 0 ? c.getLong(iId) : -1;
@@ -222,8 +224,9 @@ public class MediaRepository {
                 int h = iH >= 0 && !c.isNull(iH) ? c.getInt(iH) : 0;
                 String rel = iRel >= 0 ? c.getString(iRel) : null;
                 boolean fav = iFav >= 0 && !c.isNull(iFav) && c.getInt(iFav) != 0;
+                String desc = iDesc >= 0 && !c.isNull(iDesc) ? c.getString(iDesc) : null;
 
-                MediaImage img = new MediaImage(id, name, rel, data, taken, size, fav, mime, w, h);
+                MediaImage img = new MediaImage(id, name, rel, data, taken, size, fav, mime, w, h, desc);
                 if (!cb.onImage(img)) return;
             }
         } catch (Exception ignore) {

@@ -243,6 +243,8 @@ public class Recompressor {
     // ---- Metadata re-injection ---------------------------------------------
 
     private static final String[] COPY_TAGS = {
+            ExifInterface.TAG_IMAGE_DESCRIPTION,
+            ExifInterface.TAG_USER_COMMENT,
             ExifInterface.TAG_DATETIME,
             ExifInterface.TAG_DATETIME_ORIGINAL,
             ExifInterface.TAG_DATETIME_DIGITIZED,
