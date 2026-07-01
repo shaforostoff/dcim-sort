@@ -7,6 +7,7 @@ import android.database.Cursor;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.provider.MediaStore;
+import android.util.Log;
 
 import com.shaforostoff.dcimsort.data.CompressMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
@@ -14,6 +15,7 @@ import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.OutputStream;
 
@@ -75,17 +77,23 @@ public class Mover {
         return moveLegacy(img, folder);
     }
 
+    private static final String TAG = "DCIMSort.Mover";
+
     private Outcome moveViaMediaStore(MediaImage img, String sourceRel, String folder) {
         String newRel = childRelativePath(sourceRel, folder);
+        Log.e(TAG, "move uri=" + img.contentUri() + " relPath=" + img.relativePath + " newRel=" + newRel);
         if (img.relativePath != null && img.relativePath.equalsIgnoreCase(newRel)) {
+            Log.e(TAG, "move SKIPPED (same rel path)");
             return Outcome.SKIPPED;
         }
         ContentValues cv = new ContentValues();
         cv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
         try {
             int n = resolver().update(img.contentUri(), cv, null, null);
+            Log.e(TAG, "move update returned " + n);
             return n > 0 ? Outcome.MOVED : Outcome.FAILED;
         } catch (Exception e) {
+            Log.e(TAG, "move update exception", e);
             return Outcome.FAILED;
         }
     }
@@ -127,6 +135,10 @@ public class Mover {
     private boolean publishViaMediaStore(MediaImage img, File temp, CompressMode mode,
                                          String sourceRel, String folder) {
         String newRel = childRelativePath(sourceRel, folder);
+        // MediaStore insert into images/media only accepts DCIM/ or Pictures/ as the top-level dir.
+        if (!newRel.startsWith("DCIM/") && !newRel.startsWith("Pictures/")) {
+            newRel = "DCIM/Camera/" + folder + "/";
+        }
         String newName = baseName(img.displayName) + Recompressor.extensionFor(mode);
 
         ContentValues cv = new ContentValues();
@@ -142,9 +154,10 @@ public class Mover {
         try {
             newUri = resolver().insert(IMAGES, cv);
         } catch (Exception e) {
+            debugLog("PUB insert threw: " + e);
             return false;
         }
-        if (newUri == null) return false;
+        if (newUri == null) { debugLog("PUB insert returned null"); return false; }
 
         journal.begin(img.id, newUri);
         try {
@@ -157,15 +170,33 @@ public class Mover {
             resolver().update(newUri, done, null, null);
 
             if (!verify(newUri)) {
+                debugLog("PUB verify FAILED newUri=" + newUri);
                 safeDelete(newUri);
                 journal.abort(img.id);
                 return false;
             }
-            // Commit succeeded; delete the original (write/delete consent already granted on 30+).
+            // Try delete; fall back to IS_TRASHED=1 if delete permission was not granted.
+            boolean removed = false;
             try {
-                resolver().delete(img.contentUri(), null, null);
+                int n = resolver().delete(img.contentUri(), null, null);
+                removed = (n > 0);
+                debugLog("PUB delete n=" + n + " orig=" + img.contentUri());
             } catch (Exception e) {
-                // Original could not be deleted: roll back the new file to avoid duplicates.
+                debugLog("PUB delete threw: " + e);
+            }
+            if (!removed && Sdk.atLeastQ()) {
+                try {
+                    ContentValues trash = new ContentValues();
+                    trash.put(MediaStore.MediaColumns.IS_TRASHED, 1);
+                    int n = resolver().update(img.contentUri(), trash, null, null);
+                    removed = (n > 0);
+                    debugLog("PUB IS_TRASHED n=" + n + " orig=" + img.contentUri());
+                } catch (Exception e) {
+                    debugLog("PUB IS_TRASHED threw: " + e);
+                }
+            }
+            if (!removed) {
+                debugLog("PUB neither delete nor trash worked — rolling back newUri=" + newUri);
                 safeDelete(newUri);
                 journal.abort(img.id);
                 return false;
@@ -173,6 +204,7 @@ public class Mover {
             journal.complete(img.id);
             return true;
         } catch (Exception e) {
+            debugLog("PUB outer catch: " + e);
             safeDelete(newUri);
             journal.abort(img.id);
             return false;
@@ -227,6 +259,15 @@ public class Mover {
             MediaScannerConnection.scanFile(ctx, paths, null, null);
         } catch (Exception ignore) {
         }
+    }
+
+    private void debugLog(String msg) {
+        try {
+            File f = new File(ctx.getFilesDir(), "organize_debug.txt");
+            try (FileWriter w = new FileWriter(f, true)) {
+                w.write(msg + "\n");
+            }
+        } catch (Exception ignore) {}
     }
 
     private static void writeFileTo(File src, OutputStream out) throws IOException {

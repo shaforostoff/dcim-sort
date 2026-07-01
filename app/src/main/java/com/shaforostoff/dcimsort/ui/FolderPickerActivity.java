@@ -15,6 +15,7 @@ import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.Bucket;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -52,9 +53,26 @@ public class FolderPickerActivity extends Activity {
         load();
     }
 
+    private static boolean isImageDirectory(Bucket b) {
+        if (b.relativePath != null) {
+            return b.relativePath.startsWith("DCIM/") || b.relativePath.startsWith("Pictures/");
+        }
+        if (b.dataDir != null) {
+            String norm = b.dataDir.replace('\\', '/');
+            return norm.contains("/DCIM/") || norm.endsWith("/DCIM")
+                    || norm.contains("/Pictures/") || norm.endsWith("/Pictures");
+        }
+        return false;
+    }
+
     private void load() {
         executor.execute(() -> {
-            final List<Bucket> result = new MediaRepository(this).listBuckets();
+            List<Bucket> all = new MediaRepository(this).listBuckets();
+            List<Bucket> filtered = new ArrayList<>();
+            for (Bucket b : all) {
+                if (isImageDirectory(b)) filtered.add(b);
+            }
+            final List<Bucket> result = filtered;
             main.post(() -> {
                 buckets = result;
                 if (result.isEmpty()) {
