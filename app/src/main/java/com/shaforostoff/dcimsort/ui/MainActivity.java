@@ -45,6 +45,8 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -95,6 +97,9 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private long rangeFrom = Long.MIN_VALUE, rangeTo = Long.MAX_VALUE;
     private int summaryGen;
     private volatile double lastEstimateRatio; // last calibrated bytes/MP; handed to Preview so it needn't re-encode
+    // Lazily-calibrated bytes/MP keyed by "mode@quality". Valid only for the current image set, so
+    // clearEstimateCache() drops it whenever the folder, picked files, or date range changes.
+    private final Map<String, Double> ratioCache = new ConcurrentHashMap<>();
 
     // Pending organize job + consent queue
     private List<MediaImage> pendingImages;
@@ -376,6 +381,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             return;
         }
         allImages = null;
+        clearEstimateCache();
         txtPlan.setText(R.string.counting);
         setRangeControlsEnabled(false);
         final String rel = relPath, dir = dataDir, vol = volumeName;
@@ -431,6 +437,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (uris.isEmpty()) return;
         relPath = null; dataDir = null; displayName = null; volumeName = null; bucketId = -1;
         allImages = null;
+        clearEstimateCache();
         filesMode = true;
         pickedUris = new ArrayList<>();
         for (Uri u : uris) pickedUris.add(u.toString());
@@ -526,6 +533,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 rangeTo = endOfDay(val);
                 if (rangeFrom > rangeTo) rangeFrom = startOfDay(val);
             }
+            clearEstimateCache(); // date range changed → previously sampled set no longer applies
             updateDateLabels();
             recomputeSummary();
         }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH));
@@ -539,6 +547,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                         rangeTo = endOfDay(now);
                         if (rangeFrom > rangeTo) rangeFrom = startOfDay(now);
                     }
+                    clearEstimateCache(); // date range changed → previously sampled set no longer applies
                     updateDateLabels();
                     recomputeSummary();
                 });
@@ -557,6 +566,11 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     }
 
     // ---- Plan summary -------------------------------------------------------
+
+    /** Drops cached calibration ratios; call whenever the image set changes (folder/files/range). */
+    private void clearEstimateCache() {
+        ratioCache.clear();
+    }
 
     private void recomputeSummary() {
         if (allImages == null) {
@@ -584,12 +598,24 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             return;
         }
         final long fOriginalTotal = originalTotal;
-        txtPlan.setText(getString(R.string.plan_estimating_from, count,
-                Formatter.humanReadableBytes(fOriginalTotal)));
+        final String cacheKey = mode.name() + "@" + quality;
+        final Double cachedRatio = ratioCache.get(cacheKey);
+        if (cachedRatio == null) {
+            // Only show the "estimating…" placeholder when we actually have to re-encode samples.
+            txtPlan.setText(getString(R.string.plan_estimating_from, count,
+                    Formatter.humanReadableBytes(fOriginalTotal)));
+        }
         final Recompressor rc = new Recompressor(this, repo);
         executor.execute(() -> {
-            double ratio = SizeEstimator.calibrateRatio(
-                    inRange, mode, quality, rc, () -> gen != summaryGen);
+            double ratio;
+            if (cachedRatio != null) {
+                ratio = cachedRatio;
+            } else {
+                ratio = SizeEstimator.calibrateRatio(
+                        inRange, mode, quality, rc, () -> gen != summaryGen);
+                if (gen != summaryGen) return; // stale: don't cache a ratio for a superseded image set
+                ratioCache.put(cacheKey, ratio);
+            }
             long est = SizeEstimator.estimateWithRatio(inRange, ratio, mode, skipFav);
             if (gen != summaryGen) return;
             lastEstimateRatio = ratio; // reused by Preview instead of re-encoding samples
