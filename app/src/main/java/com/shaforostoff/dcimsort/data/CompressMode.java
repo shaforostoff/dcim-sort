@@ -5,7 +5,8 @@ public enum CompressMode {
     NONE,
     WEBP,
     HEIC,
-    AVIF;
+    AVIF,
+    JPEG;
 
     public boolean recompresses() {
         return this != NONE;

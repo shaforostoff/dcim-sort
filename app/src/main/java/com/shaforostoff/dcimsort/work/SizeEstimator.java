@@ -17,6 +17,7 @@ public final class SizeEstimator {
     public static final double WEBP_BYTES_PER_MP = 0.22 * 1024 * 1024;
     public static final double HEIC_BYTES_PER_MP = 0.12 * 1024 * 1024;
     public static final double AVIF_BYTES_PER_MP = 0.10 * 1024 * 1024;
+    public static final double JPEG_BYTES_PER_MP = 0.30 * 1024 * 1024;
 
     private static final int SAMPLE_COUNT = 6;
 
@@ -85,6 +86,7 @@ public final class SizeEstimator {
         switch (mode) {
             case HEIC: return HEIC_BYTES_PER_MP;
             case AVIF: return AVIF_BYTES_PER_MP;
+            case JPEG: return JPEG_BYTES_PER_MP;
             default: return WEBP_BYTES_PER_MP;
         }
     }

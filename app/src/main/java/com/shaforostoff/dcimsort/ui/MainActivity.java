@@ -65,7 +65,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // Views
     private TextView txtFolder, txtQuality, txtProgress, txtPlan;
     private RadioGroup radioMode;
-    private RadioButton radioNone, radioWebp, radioHeic, radioAvif;
+    private RadioButton radioNone, radioWebp, radioHeic, radioAvif, radioJpeg;
     private RadioGroup radioGroupMode;
     private RadioButton radioGroupNone, radioGroupPlaceMonth, radioGroupPlaceDay;
     private LinearLayout qualityGroup, progressGroup, dateRangeGroup;
@@ -140,6 +140,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         radioWebp = findViewById(R.id.radio_compresswebp);
         radioHeic = findViewById(R.id.radio_compressheic);
         radioAvif = findViewById(R.id.radio_compressavif);
+        radioJpeg = findViewById(R.id.radio_compressjpeg);
         qualityGroup = findViewById(R.id.quality_group);
         txtQuality = findViewById(R.id.txt_quality);
         seekQuality = findViewById(R.id.seek_quality);
@@ -182,9 +183,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (!Recompressor.hasHeicEncoder()) {
             radioHeic.setVisibility(View.GONE);
         }
-        // AVIF only on Android 16+ with an AV1 encoder.
+        // AVIF: Android 16+ platform encoder, or the full flavor's bundled libavif on any version.
         if (!Recompressor.hasAvifEncoder()) {
             radioAvif.setVisibility(View.GONE);
+        }
+        // JPEG only in the full flavor (jpegli is bundled there).
+        if (!Recompressor.hasJpegliEncoder()) {
+            radioJpeg.setVisibility(View.GONE);
         }
         // Favorites skip only on Android 11+.
         if (!Sdk.atLeastR()) {
@@ -249,10 +254,14 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (mode == CompressMode.AVIF && !Recompressor.hasAvifEncoder()) {
             mode = CompressMode.NONE;
         }
+        if (mode == CompressMode.JPEG && !Recompressor.hasJpegliEncoder()) {
+            mode = CompressMode.NONE;
+        }
         switch (mode) {
             case WEBP: radioWebp.setChecked(true); break;
             case HEIC: radioHeic.setChecked(true); break;
             case AVIF: radioAvif.setChecked(true); break;
+            case JPEG: radioJpeg.setChecked(true); break;
             default: radioNone.setChecked(true); break;
         }
         qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
@@ -282,6 +291,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (id == R.id.radio_compresswebp) return CompressMode.WEBP;
         if (id == R.id.radio_compressheic) return CompressMode.HEIC;
         if (id == R.id.radio_compressavif) return CompressMode.AVIF;
+        if (id == R.id.radio_compressjpeg) return CompressMode.JPEG;
         return CompressMode.NONE;
     }
 

@@ -1,0 +1,6 @@
+[submodule "app/src/main/cpp/third_party/libavif"]
+	path = app/src/main/cpp/third_party/libavif
+	url = https://github.com/AOMediaCodec/libavif.git
+[submodule "app/src/main/cpp/third_party/jpegli"]
+	path = app/src/main/cpp/third_party/jpegli
+	url = https://github.com/google/jpegli.git
