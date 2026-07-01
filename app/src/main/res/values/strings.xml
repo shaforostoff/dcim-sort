@@ -58,6 +58,7 @@
     <!-- Preview list -->
     <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>
     <string name="estimating">estimating…</string>
+    <string name="estimating_progress">estimating… %1$d / %2$d</string>
     <string name="preview_empty">No photos to organize.</string>
 
     <!-- Viewer -->

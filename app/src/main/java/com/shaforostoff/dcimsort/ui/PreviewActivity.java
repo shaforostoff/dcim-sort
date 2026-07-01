@@ -11,6 +11,7 @@ import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.GridView;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import com.shaforostoff.dcimsort.R;
@@ -48,7 +49,9 @@ public class PreviewActivity extends Activity {
 
     private ListView folderList;
     private GridView photoGrid;
+    private View statusGroup;
     private TextView status;
+    private ProgressBar progress;
     private Button btnSelectToggle;
     private ThumbnailLoader thumbLoader;
 
@@ -79,7 +82,9 @@ public class PreviewActivity extends Activity {
         setContentView(R.layout.activity_preview);
         folderList = findViewById(R.id.folder_list);
         photoGrid = findViewById(R.id.photo_grid);
+        statusGroup = findViewById(R.id.status_group);
         status = findViewById(R.id.status);
+        progress = findViewById(R.id.progress);
         btnSelectToggle = findViewById(R.id.btn_select_toggle);
 
         relPath = getIntent().getStringExtra(Extras.REL_PATH);
@@ -124,44 +129,80 @@ public class PreviewActivity extends Activity {
     }
 
     private void computePlan() {
-        status.setVisibility(View.VISIBLE);
+        statusGroup.setVisibility(View.VISIBLE);
         status.setText(R.string.estimating);
+        progress.setVisibility(View.VISIBLE);
+        progress.setIndeterminate(true);
         folderList.setVisibility(View.GONE);
         photoGrid.setVisibility(View.GONE);
 
         final MediaRepository repo = new MediaRepository(this);
+        final GeoCache cache = new GeoCache(this);
         final TargetResolver targets = new TargetResolver(
-                new GeoExtractor(repo), new PlaceResolver(this, new GeoCache(this)), groupMode);
+                new GeoExtractor(repo), new PlaceResolver(this, cache), groupMode);
 
         executor.execute(() -> {
-            final Map<String, PlanFolder> map = new LinkedHashMap<>();
-            MediaRepository.RowCallback group = img -> {
-                if (cancelled) return false;
-                if (!range.contains(img.dateTakenMillis)) return true;
-                String name = targets.folderFor(img);
-                PlanFolder pf = map.get(name);
-                if (pf == null) {
-                    pf = new PlanFolder(name);
-                    map.put(name, pf);
-                }
-                pf.images.add(img);
-                pf.currentBytes += img.size;
-                return true;
-            };
+            // Phase 1: collect rows (fast — just MediaStore reads, no geocoding) to get a total.
+            final List<MediaImage> images = new ArrayList<>();
             if (fileUris != null && !fileUris.isEmpty()) {
                 List<android.net.Uri> uris = new ArrayList<>(fileUris.size());
                 for (String s : fileUris) uris.add(android.net.Uri.parse(s));
-                for (MediaImage img : repo.fetchByUris(uris)) {
-                    if (!group.onImage(img)) break;
-                }
+                images.addAll(repo.fetchByUris(uris));
             } else {
-                repo.forEachNewestFirst(relPath, dataDir, volumeName, group);
+                repo.forEachNewestFirst(relPath, dataDir, volumeName, img -> {
+                    if (cancelled) return false;
+                    images.add(img);
+                    return true;
+                });
             }
+            if (cancelled) return;
+
+            // Phase 2: group with geocoding (the slow part), reporting progress per image.
+            final int total = images.size();
+            // Update at most ~100 times to avoid flooding the main thread with posts.
+            final int step = Math.max(1, total / 100);
+            main.post(() -> startProgress(total));
+
+            final Map<String, PlanFolder> map = new LinkedHashMap<>();
+            int processed = 0;
+            for (MediaImage img : images) {
+                if (cancelled) return;
+                if (range.contains(img.dateTakenMillis)) {
+                    String name = targets.folderFor(img);
+                    PlanFolder pf = map.get(name);
+                    if (pf == null) {
+                        pf = new PlanFolder(name);
+                        map.put(name, pf);
+                    }
+                    pf.images.add(img);
+                    pf.currentBytes += img.size;
+                }
+                processed++;
+                if (processed % step == 0 || processed == total) {
+                    final int done = processed;
+                    main.post(() -> updateProgress(done, total));
+                }
+            }
+            cache.flush(); // persist newly resolved places so the next Preview reuses them
+
             final List<PlanFolder> list = new ArrayList<>(map.values());
             estimate(list);
             if (cancelled) return;
             main.post(() -> showFolders(list));
         });
+    }
+
+    private void startProgress(int total) {
+        if (total <= 0) return;
+        progress.setIndeterminate(false);
+        progress.setMax(total);
+        progress.setProgress(0);
+        status.setText(getString(R.string.estimating_progress, 0, total));
+    }
+
+    private void updateProgress(int done, int total) {
+        progress.setProgress(done);
+        status.setText(getString(R.string.estimating_progress, done, total));
     }
 
     private void estimate(List<PlanFolder> list) {
@@ -178,8 +219,9 @@ public class PreviewActivity extends Activity {
 
     private void showFolders(List<PlanFolder> list) {
         folders = list;
+        progress.setVisibility(View.GONE);
         if (list.isEmpty()) {
-            status.setVisibility(View.VISIBLE);
+            statusGroup.setVisibility(View.VISIBLE);
             status.setText(R.string.preview_empty);
             return;
         }
@@ -188,7 +230,7 @@ public class PreviewActivity extends Activity {
             openFolder(list.get(0));
             return;
         }
-        status.setVisibility(View.GONE);
+        statusGroup.setVisibility(View.GONE);
         photoGrid.setVisibility(View.GONE);
         folderList.setVisibility(View.VISIBLE);
 
@@ -204,7 +246,7 @@ public class PreviewActivity extends Activity {
 
     private void openFolder(PlanFolder pf) {
         openFolderRef = pf;
-        status.setVisibility(View.GONE);
+        statusGroup.setVisibility(View.GONE);
         folderList.setVisibility(View.GONE);
         photoGrid.setVisibility(View.VISIBLE);
         photoGrid.setAdapter(new PhotoAdapter(this, pf.images, thumbLoader));
