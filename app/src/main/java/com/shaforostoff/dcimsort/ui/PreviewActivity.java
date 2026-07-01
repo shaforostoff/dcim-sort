@@ -306,6 +306,14 @@ public class PreviewActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (openFolderRef != null && photoGrid.getVisibility() == View.VISIBLE) {
+            refreshGrid();
+        }
+    }
+
+    @Override
     public void onBackPressed() {
         if (photoGrid.getVisibility() == View.VISIBLE && !foldersSkipped) {
             photoGrid.setVisibility(View.GONE);
