@@ -1,0 +1,89 @@
+<resources>
+    <string name="app_name">DCIM Sort</string>
+
+    <!-- Screen titles -->
+    <string name="title_pick_folder">Seleccionar carpeta</string>
+    <string name="title_preview">Vista previa</string>
+
+    <!-- Main screen -->
+    <string name="browse">Carpetas</string>
+    <string name="pick_files">Archivos</string>
+    <string name="no_folder_selected">Ninguna carpeta seleccionada</string>
+    <string name="counting">Contando…</string>
+    <string name="calculating_size">calculando tamaño…</string>
+    <string name="photos_count_only">%1$d fotos</string>
+
+    <string name="groupfolder_label">Agrupar en carpetas</string>
+    <string name="groupmode_none">No</string>
+    <string name="groupmode_placemonth">Lugar-Mes</string>
+    <string name="groupmode_placeday">Lugar-Día</string>
+
+    <string name="recompress_label">Recompresión</string>
+    <string name="compressmode_none">No</string>
+    <string name="compressmode_webp">WebP</string>
+    <string name="compressmode_heic">HEIC</string>
+    <string name="compressmode_avif">AVIF</string>
+    <string name="compressmode_jpeg">JPEG-li</string>
+    <string name="quality_label">Calidad: %1$d</string>
+    <string name="skip_favorites">No comprimir fotos marcadas como favoritas</string>
+    <string name="skip_low_gain">Omitir compresión si el nuevo tamaño &gt;50%</string>
+    <string name="keep_original">Conservar original (copiar en lugar de mover)</string>
+    <string name="keep_original_forced">Algunas fotos seleccionadas no están en este dispositivo: se conservarán los originales</string>
+
+    <!-- Date range -->
+    <string name="date_range_label">Rango de fechas</string>
+    <string name="date_from_label">Desde %1$s</string>
+    <string name="date_to_label">Hasta %1$s</string>
+
+    <!-- Plan summary (above action buttons) -->
+    <string name="plan_summary_estimated">%1$d archivos · ~%2$s</string>
+    <string name="plan_summary_exact">%1$d archivos · %2$s</string>
+    <string name="plan_estimating">%1$d archivos · estimando…</string>
+    <string name="plan_summary_from">%1$d archivos · %2$s → ~%3$s</string>
+    <string name="plan_estimating_from">%1$d archivos · %2$s → estimando…</string>
+
+    <string name="preview">Vista previa</string>
+    <string name="organize">Organizar</string>
+    <string name="stop">Detener</string>
+
+    <!-- Permissions -->
+    <string name="need_media_permission">Se requiere permiso de almacenamiento/fotos para leer tus imágenes.</string>
+    <string name="need_media_location">Permite la ubicación de los medios para leer el GPS de las fotos y obtener nombres de lugares.</string>
+    <string name="grant">Conceder</string>
+
+    <!-- Progress -->
+    <string name="organizing_progress">%1$d / %2$d · %3$s</string>
+    <string name="organize_notification_title">Organizando fotos</string>
+    <string name="organize_channel_name">Progreso de organización</string>
+    <string name="organize_done">Listo: %1$d movidas, %2$d omitidas, %3$d fallidas</string>
+    <string name="organize_stopped">Detenido</string>
+
+    <!-- Preview list -->
+    <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>
+    <string name="estimating">estimando…</string>
+    <string name="estimating_progress">estimando… %1$d / %2$d</string>
+    <string name="preview_empty">No hay fotos para organizar.</string>
+
+    <!-- Viewer -->
+    <string name="exclude">Excluir</string>
+    <string name="include">Incluir</string>
+    <string name="compare_overlay">%1$s → %2$s</string>
+    <string name="hold_to_compare">Mantén pulsado para comparar con la versión comprimida</string>
+    <string name="favorite_no_compress">Favorita: no se comprimirá</string>
+    <string name="compressing">Comprimiendo…</string>
+
+    <!-- Folder sort -->
+    <string name="sort_by_count">Cantidad</string>
+    <string name="sort_by_name">A–Z</string>
+
+    <!-- Misc -->
+    <string name="unknown_place">Desconocido</string>
+    <string name="today">Hoy</string>
+    <string name="select_folder_first">Selecciona primero una carpeta.</string>
+    <string name="no_photos">No hay fotos en esta carpeta.</string>
+    <string name="select_all">Seleccionar todo</string>
+    <string name="select_none">No seleccionar ninguno</string>
+    <string name="btn_info">Licencias</string>
+    <string name="info_dialog_title">Acerca de</string>
+    <string name="close">Cerrar</string>
+</resources>

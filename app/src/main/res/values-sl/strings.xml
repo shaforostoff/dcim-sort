@@ -1,0 +1,89 @@
+<resources>
+    <string name="app_name">DCIM Sort</string>
+
+    <!-- Screen titles -->
+    <string name="title_pick_folder">Izbira mape</string>
+    <string name="title_preview">Predogled</string>
+
+    <!-- Main screen -->
+    <string name="browse">Mape</string>
+    <string name="pick_files">Datoteke</string>
+    <string name="no_folder_selected">Mapa ni izbrana</string>
+    <string name="counting">Štetje…</string>
+    <string name="calculating_size">računanje velikosti…</string>
+    <string name="photos_count_only">%1$d fotografij</string>
+
+    <string name="groupfolder_label">Združi v mape</string>
+    <string name="groupmode_none">Ne</string>
+    <string name="groupmode_placemonth">Kraj-Mesec</string>
+    <string name="groupmode_placeday">Kraj-Dan</string>
+
+    <string name="recompress_label">Ponovno stiskanje</string>
+    <string name="compressmode_none">Ne</string>
+    <string name="compressmode_webp">WebP</string>
+    <string name="compressmode_heic">HEIC</string>
+    <string name="compressmode_avif">AVIF</string>
+    <string name="compressmode_jpeg">JPEG-li</string>
+    <string name="quality_label">Kakovost: %1$d</string>
+    <string name="skip_favorites">Ne stiskaj fotografij, označenih kot priljubljene</string>
+    <string name="skip_low_gain">Preskoči stiskanje, če je nova velikost &gt;50%</string>
+    <string name="keep_original">Ohrani izvirnik (kopiraj namesto premikanja)</string>
+    <string name="keep_original_forced">Nekatere izbrane fotografije niso na tej napravi — izvirniki bodo ohranjeni</string>
+
+    <!-- Date range -->
+    <string name="date_range_label">Časovno obdobje</string>
+    <string name="date_from_label">Od %1$s</string>
+    <string name="date_to_label">Do %1$s</string>
+
+    <!-- Plan summary (above action buttons) -->
+    <string name="plan_summary_estimated">%1$d datotek · ~%2$s</string>
+    <string name="plan_summary_exact">%1$d datotek · %2$s</string>
+    <string name="plan_estimating">%1$d datotek · ocenjevanje…</string>
+    <string name="plan_summary_from">%1$d datotek · %2$s → ~%3$s</string>
+    <string name="plan_estimating_from">%1$d datotek · %2$s → ocenjevanje…</string>
+
+    <string name="preview">Predogled</string>
+    <string name="organize">Organiziraj</string>
+    <string name="stop">Ustavi</string>
+
+    <!-- Permissions -->
+    <string name="need_media_permission">Za branje vaših slik je potrebno dovoljenje za shrambo/fotografije.</string>
+    <string name="need_media_location">Dovolite lokacijo medijev za branje GPS fotografij za imena krajev.</string>
+    <string name="grant">Dovoli</string>
+
+    <!-- Progress -->
+    <string name="organizing_progress">%1$d / %2$d · %3$s</string>
+    <string name="organize_notification_title">Organiziranje fotografij</string>
+    <string name="organize_channel_name">Napredek organiziranja</string>
+    <string name="organize_done">Končano: %1$d premaknjenih, %2$d preskočenih, %3$d neuspešnih</string>
+    <string name="organize_stopped">Ustavljeno</string>
+
+    <!-- Preview list -->
+    <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>
+    <string name="estimating">ocenjevanje…</string>
+    <string name="estimating_progress">ocenjevanje… %1$d / %2$d</string>
+    <string name="preview_empty">Ni fotografij za organiziranje.</string>
+
+    <!-- Viewer -->
+    <string name="exclude">Izključi</string>
+    <string name="include">Vključi</string>
+    <string name="compare_overlay">%1$s → %2$s</string>
+    <string name="hold_to_compare">Pridržite za primerjavo s stisnjeno različico</string>
+    <string name="favorite_no_compress">Priljubljeno — ne bo stisnjeno</string>
+    <string name="compressing">Stiskanje…</string>
+
+    <!-- Folder sort -->
+    <string name="sort_by_count">Število</string>
+    <string name="sort_by_name">A–Z</string>
+
+    <!-- Misc -->
+    <string name="unknown_place">Neznano</string>
+    <string name="today">Danes</string>
+    <string name="select_folder_first">Najprej izberite mapo.</string>
+    <string name="no_photos">V tej mapi ni fotografij.</string>
+    <string name="select_all">Izberi vse</string>
+    <string name="select_none">Prekliči izbor</string>
+    <string name="btn_info">Licence</string>
+    <string name="info_dialog_title">O programu</string>
+    <string name="close">Zapri</string>
+</resources>

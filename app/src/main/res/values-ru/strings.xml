@@ -1,0 +1,89 @@
+<resources>
+    <string name="app_name">DCIM Sort</string>
+
+    <!-- Screen titles -->
+    <string name="title_pick_folder">Выбор папки</string>
+    <string name="title_preview">Просмотр</string>
+
+    <!-- Main screen -->
+    <string name="browse">Папки</string>
+    <string name="pick_files">Файлы</string>
+    <string name="no_folder_selected">Папка не выбрана</string>
+    <string name="counting">Подсчёт…</string>
+    <string name="calculating_size">вычисление размера…</string>
+    <string name="photos_count_only">%1$d фото</string>
+
+    <string name="groupfolder_label">Группировать по папкам</string>
+    <string name="groupmode_none">Нет</string>
+    <string name="groupmode_placemonth">Место-Месяц</string>
+    <string name="groupmode_placeday">Место-День</string>
+
+    <string name="recompress_label">Пересжатие</string>
+    <string name="compressmode_none">Нет</string>
+    <string name="compressmode_webp">WebP</string>
+    <string name="compressmode_heic">HEIC</string>
+    <string name="compressmode_avif">AVIF</string>
+    <string name="compressmode_jpeg">JPEG-li</string>
+    <string name="quality_label">Качество: %1$d</string>
+    <string name="skip_favorites">Не сжимать фото, отмеченные как избранные</string>
+    <string name="skip_low_gain">Не сжимать, если новый размер &gt;50%</string>
+    <string name="keep_original">Сохранять оригинал (копировать, а не перемещать)</string>
+    <string name="keep_original_forced">Некоторые выбранные фото недоступны на этом устройстве — оригиналы будут сохранены</string>
+
+    <!-- Date range -->
+    <string name="date_range_label">Диапазон дат</string>
+    <string name="date_from_label">С %1$s</string>
+    <string name="date_to_label">По %1$s</string>
+
+    <!-- Plan summary (above action buttons) -->
+    <string name="plan_summary_estimated">%1$d файлов · ~%2$s</string>
+    <string name="plan_summary_exact">%1$d файлов · %2$s</string>
+    <string name="plan_estimating">%1$d файлов · оценка…</string>
+    <string name="plan_summary_from">%1$d файлов · %2$s → ~%3$s</string>
+    <string name="plan_estimating_from">%1$d файлов · %2$s → оценка…</string>
+
+    <string name="preview">Просмотр</string>
+    <string name="organize">Организовать</string>
+    <string name="stop">Стоп</string>
+
+    <!-- Permissions -->
+    <string name="need_media_permission">Для чтения ваших изображений требуется разрешение на доступ к хранилищу/фото.</string>
+    <string name="need_media_location">Разрешите доступ к геоданным фото, чтобы определять названия мест.</string>
+    <string name="grant">Разрешить</string>
+
+    <!-- Progress -->
+    <string name="organizing_progress">%1$d / %2$d · %3$s</string>
+    <string name="organize_notification_title">Организация фото</string>
+    <string name="organize_channel_name">Прогресс организации</string>
+    <string name="organize_done">Готово: %1$d перемещено, %2$d пропущено, %3$d не удалось</string>
+    <string name="organize_stopped">Остановлено</string>
+
+    <!-- Preview list -->
+    <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>
+    <string name="estimating">оценка…</string>
+    <string name="estimating_progress">оценка… %1$d / %2$d</string>
+    <string name="preview_empty">Нет фото для организации.</string>
+
+    <!-- Viewer -->
+    <string name="exclude">Исключить</string>
+    <string name="include">Включить</string>
+    <string name="compare_overlay">%1$s → %2$s</string>
+    <string name="hold_to_compare">Удерживайте для сравнения со сжатым</string>
+    <string name="favorite_no_compress">Избранное — не будет сжато</string>
+    <string name="compressing">Сжатие…</string>
+
+    <!-- Folder sort -->
+    <string name="sort_by_count">Количество</string>
+    <string name="sort_by_name">A–Z</string>
+
+    <!-- Misc -->
+    <string name="unknown_place">Неизвестно</string>
+    <string name="today">Сегодня</string>
+    <string name="select_folder_first">Сначала выберите папку.</string>
+    <string name="no_photos">В этой папке нет фото.</string>
+    <string name="select_all">Выбрать все</string>
+    <string name="select_none">Снять выделение</string>
+    <string name="btn_info">Лицензии</string>
+    <string name="info_dialog_title">О приложении</string>
+    <string name="close">Закрыть</string>
+</resources>

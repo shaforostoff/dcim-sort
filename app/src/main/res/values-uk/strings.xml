@@ -1,0 +1,89 @@
+<resources>
+    <string name="app_name">DCIM Sort</string>
+
+    <!-- Screen titles -->
+    <string name="title_pick_folder">Виберіть папку</string>
+    <string name="title_preview">Перегляд</string>
+
+    <!-- Main screen -->
+    <string name="browse">Папки</string>
+    <string name="pick_files">Файли</string>
+    <string name="no_folder_selected">Папку не вибрано</string>
+    <string name="counting">Підрахунок…</string>
+    <string name="calculating_size">обчислення розміру…</string>
+    <string name="photos_count_only">%1$d фото</string>
+
+    <string name="groupfolder_label">Групувати в папки</string>
+    <string name="groupmode_none">Немає</string>
+    <string name="groupmode_placemonth">Місце-Місяць</string>
+    <string name="groupmode_placeday">Місце-День</string>
+
+    <string name="recompress_label">Повторне стиснення</string>
+    <string name="compressmode_none">Немає</string>
+    <string name="compressmode_webp">WebP</string>
+    <string name="compressmode_heic">HEIC</string>
+    <string name="compressmode_avif">AVIF</string>
+    <string name="compressmode_jpeg">JPEG-li</string>
+    <string name="quality_label">Якість: %1$d</string>
+    <string name="skip_favorites">Не стискати фото, позначені як улюблені</string>
+    <string name="skip_low_gain">Пропустити стиснення, якщо новий розмір &gt;50%</string>
+    <string name="keep_original">Зберігати оригінал (копіювати, а не переміщувати)</string>
+    <string name="keep_original_forced">Деякі вибрані фото відсутні на цьому пристрої — оригінали буде збережено</string>
+
+    <!-- Date range -->
+    <string name="date_range_label">Діапазон дат</string>
+    <string name="date_from_label">Від %1$s</string>
+    <string name="date_to_label">До %1$s</string>
+
+    <!-- Plan summary (above action buttons) -->
+    <string name="plan_summary_estimated">%1$d файлів · ~%2$s</string>
+    <string name="plan_summary_exact">%1$d файлів · %2$s</string>
+    <string name="plan_estimating">%1$d файлів · оцінка…</string>
+    <string name="plan_summary_from">%1$d файлів · %2$s → ~%3$s</string>
+    <string name="plan_estimating_from">%1$d файлів · %2$s → оцінка…</string>
+
+    <string name="preview">Перегляд</string>
+    <string name="organize">Організувати</string>
+    <string name="stop">Зупинити</string>
+
+    <!-- Permissions -->
+    <string name="need_media_permission">Для читання ваших зображень потрібен дозвіл на доступ до сховища/фото.</string>
+    <string name="need_media_location">Дозвольте доступ до геоданих медіа, щоб визначати назви місць за GPS фото.</string>
+    <string name="grant">Дозволити</string>
+
+    <!-- Progress -->
+    <string name="organizing_progress">%1$d / %2$d · %3$s</string>
+    <string name="organize_notification_title">Організація фото</string>
+    <string name="organize_channel_name">Прогрес організації</string>
+    <string name="organize_done">Готово: %1$d переміщено, %2$d пропущено, %3$d не вдалося</string>
+    <string name="organize_stopped">Зупинено</string>
+
+    <!-- Preview list -->
+    <string name="folder_summary">%1$s (%2$d, ~%3$s)</string>
+    <string name="estimating">оцінка…</string>
+    <string name="estimating_progress">оцінка… %1$d / %2$d</string>
+    <string name="preview_empty">Немає фото для організації.</string>
+
+    <!-- Viewer -->
+    <string name="exclude">Виключити</string>
+    <string name="include">Включити</string>
+    <string name="compare_overlay">%1$s → %2$s</string>
+    <string name="hold_to_compare">Утримуйте, щоб порівняти зі стисненим</string>
+    <string name="favorite_no_compress">Улюблене — не буде стиснуто</string>
+    <string name="compressing">Стиснення…</string>
+
+    <!-- Folder sort -->
+    <string name="sort_by_count">Кількість</string>
+    <string name="sort_by_name">A–Z</string>
+
+    <!-- Misc -->
+    <string name="unknown_place">Невідомо</string>
+    <string name="today">Сьогодні</string>
+    <string name="select_folder_first">Спочатку виберіть папку.</string>
+    <string name="no_photos">У цій папці немає фото.</string>
+    <string name="select_all">Вибрати все</string>
+    <string name="select_none">Скасувати вибір</string>
+    <string name="btn_info">Ліцензії</string>
+    <string name="info_dialog_title">Про застосунок</string>
+    <string name="close">Закрити</string>
+</resources>
