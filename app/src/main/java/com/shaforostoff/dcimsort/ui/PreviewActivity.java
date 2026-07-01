@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.WindowInsets;
 import android.widget.ArrayAdapter;
 import android.widget.BaseAdapter;
 import android.widget.Button;
@@ -25,6 +26,7 @@ import com.shaforostoff.dcimsort.geo.GeoCache;
 import com.shaforostoff.dcimsort.geo.GeoExtractor;
 import com.shaforostoff.dcimsort.geo.PlaceResolver;
 import com.shaforostoff.dcimsort.util.Formatter;
+import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.work.SizeEstimator;
 import com.shaforostoff.dcimsort.work.TargetResolver;
 
@@ -82,6 +84,7 @@ public class PreviewActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_preview);
+        applySystemBarsInsets();
         folderList = findViewById(R.id.folder_list);
         photoGrid = findViewById(R.id.photo_grid);
         statusGroup = findViewById(R.id.status_group);
@@ -312,6 +315,20 @@ public class PreviewActivity extends Activity {
         } else {
             super.onBackPressed();
         }
+    }
+
+    private void applySystemBarsInsets() {
+        View root = findViewById(android.R.id.content);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            if (Sdk.atLeastR()) {
+                v.setPadding(0, insets.getInsets(WindowInsets.Type.systemBars()).top,
+                        0, insets.getInsets(WindowInsets.Type.systemBars()).bottom);
+            } else {
+                v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
+        root.requestApplyInsets();
     }
 
     @Override

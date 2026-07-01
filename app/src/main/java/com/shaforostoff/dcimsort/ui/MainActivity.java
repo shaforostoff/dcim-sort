@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.View;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
@@ -115,6 +116,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        applySystemBarsInsets();
 
         settings = new SettingsStore(this);
         repo = new MediaRepository(this);
@@ -129,6 +131,20 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             requestNeededPermissions();
             txtPlan.setText(R.string.need_media_permission);
         }
+    }
+
+    private void applySystemBarsInsets() {
+        View root = findViewById(android.R.id.content);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            if (Sdk.atLeastR()) {
+                v.setPadding(0, insets.getInsets(WindowInsets.Type.systemBars()).top,
+                        0, insets.getInsets(WindowInsets.Type.systemBars()).bottom);
+            } else {
+                v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
+        root.requestApplyInsets();
     }
 
     private void bindViews() {

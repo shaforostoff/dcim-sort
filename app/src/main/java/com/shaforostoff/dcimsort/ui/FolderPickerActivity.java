@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.WindowInsets;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -14,6 +15,7 @@ import android.widget.Toast;
 import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.Bucket;
 import com.shaforostoff.dcimsort.data.MediaRepository;
+import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +36,7 @@ public class FolderPickerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_folder_picker);
+        applySystemBarsInsets();
         list = findViewById(R.id.list);
         empty = findViewById(R.id.empty);
         list.setEmptyView(empty);
@@ -101,6 +104,20 @@ public class FolderPickerActivity extends Activity {
                 });
             });
         });
+    }
+
+    private void applySystemBarsInsets() {
+        View root = findViewById(android.R.id.content);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            if (Sdk.atLeastR()) {
+                v.setPadding(0, insets.getInsets(WindowInsets.Type.systemBars()).top,
+                        0, insets.getInsets(WindowInsets.Type.systemBars()).bottom);
+            } else {
+                v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
+        root.requestApplyInsets();
     }
 
     @Override
