@@ -436,7 +436,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             txtPlan.setText("");
             return;
         }
-        final List<MediaImage> inRange = imagesInRange();
+        final List<MediaImage> inRange = SelectionStore.filter(imagesInRange());
         final int count = inRange.size();
         final CompressMode mode = currentMode();
         final int quality = seekQuality.getProgress();
@@ -512,8 +512,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             toast(R.string.counting);
             return;
         }
-        // Reuse the cached folder listing, scoped to the selected date range.
-        final List<MediaImage> imgs = imagesInRange();
+        // Reuse the cached folder listing, scoped to the selected date range and preview selection.
+        final List<MediaImage> imgs = SelectionStore.filter(imagesInRange());
         if (imgs.isEmpty()) {
             toast(R.string.no_photos);
             return;
@@ -618,6 +618,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             setBusy(true);
             progressGroup.setVisibility(View.VISIBLE);
             onProgress(OrganizeService.P_DONE, OrganizeService.P_TOTAL, OrganizeService.P_FOLDER);
+        } else if (allImages != null) {
+            recomputeSummary();
         }
     }
 

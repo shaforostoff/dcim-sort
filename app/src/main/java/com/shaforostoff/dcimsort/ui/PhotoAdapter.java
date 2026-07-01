@@ -34,7 +34,9 @@ public class PhotoAdapter extends BaseAdapter {
         if (iv == null) {
             iv = (ImageView) inflater.inflate(R.layout.item_photo, parent, false);
         }
-        loader.load(images.get(position), iv);
+        MediaImage img = images.get(position);
+        loader.load(img, iv);
+        iv.setAlpha(SelectionStore.isSelected(img.id) ? 1f : 0.35f);
         return iv;
     }
 }

@@ -7,6 +7,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.widget.ArrayAdapter;
+import android.widget.BaseAdapter;
+import android.widget.Button;
 import android.widget.GridView;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -47,6 +49,7 @@ public class PreviewActivity extends Activity {
     private ListView folderList;
     private GridView photoGrid;
     private TextView status;
+    private Button btnSelectToggle;
     private ThumbnailLoader thumbLoader;
 
     private String relPath, dataDir, volumeName;
@@ -76,6 +79,7 @@ public class PreviewActivity extends Activity {
         folderList = findViewById(R.id.folder_list);
         photoGrid = findViewById(R.id.photo_grid);
         status = findViewById(R.id.status);
+        btnSelectToggle = findViewById(R.id.btn_select_toggle);
 
         relPath = getIntent().getStringExtra(Extras.REL_PATH);
         dataDir = getIntent().getStringExtra(Extras.DATA_DIR);
@@ -94,8 +98,27 @@ public class PreviewActivity extends Activity {
 
         folderList.setOnItemClickListener((p, v, pos, id) -> openFolder(folders.get(pos)));
         photoGrid.setOnItemClickListener((p, v, pos, id) -> openViewer(openFolderRef.images.get(pos)));
+        photoGrid.setOnItemLongClickListener((p, v, pos, id) -> {
+            SelectionStore.toggle(openFolderRef.images.get(pos).id);
+            refreshGrid();
+            return true;
+        });
+        btnSelectToggle.setOnClickListener(v -> {
+            if (SelectionStore.allSelected(openFolderRef.images)) {
+                SelectionStore.deselectAll(openFolderRef.images);
+            } else {
+                SelectionStore.selectAll(openFolderRef.images);
+            }
+            refreshGrid();
+        });
 
         computePlan();
+    }
+
+    private void refreshGrid() {
+        ((BaseAdapter) photoGrid.getAdapter()).notifyDataSetChanged();
+        boolean allSel = SelectionStore.allSelected(openFolderRef.images);
+        btnSelectToggle.setText(allSel ? R.string.select_none : R.string.select_all);
     }
 
     private void computePlan() {
@@ -174,6 +197,8 @@ public class PreviewActivity extends Activity {
         folderList.setVisibility(View.GONE);
         photoGrid.setVisibility(View.VISIBLE);
         photoGrid.setAdapter(new PhotoAdapter(this, pf.images, thumbLoader));
+        btnSelectToggle.setVisibility(View.VISIBLE);
+        refreshGrid();
         setTitle(pf.name != null ? pf.name : getString(R.string.title_preview));
     }
 
@@ -191,6 +216,7 @@ public class PreviewActivity extends Activity {
     public void onBackPressed() {
         if (photoGrid.getVisibility() == View.VISIBLE && !foldersSkipped) {
             photoGrid.setVisibility(View.GONE);
+            btnSelectToggle.setVisibility(View.GONE);
             folderList.setVisibility(View.VISIBLE);
             openFolderRef = null;
             setTitle(R.string.title_preview);
