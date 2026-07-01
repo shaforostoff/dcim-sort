@@ -20,12 +20,18 @@ import android.widget.ImageView;
  * Also supports a "hold to compare" gesture: pressing one finger still for >500ms fires a compare
  * callback; releasing reverts. Swapping the bitmap via {@link #setImageBitmapKeepMatrix} preserves
  * the current zoom/visible region (used to overlay the compressed version).
+ * When at base (fit) scale a horizontal fling triggers {@link NavigationListener}.
  */
 public class ZoomableImageView extends ImageView {
 
     public interface CompareListener {
         void onCompareStart();
         void onCompareEnd();
+    }
+
+    public interface NavigationListener {
+        void onSwipePrev();
+        void onSwipeNext();
     }
 
     private static final long LONG_PRESS_MS = 500;
@@ -42,9 +48,11 @@ public class ZoomableImageView extends ImageView {
     private Runnable longPressRunnable;
     private float downX, downY;
     private int touchSlop;
+    private int minFlingVelocity;
     private boolean comparing = false;
     private boolean compareEnabled = false;
     private CompareListener compareListener;
+    private NavigationListener navListener;
 
     public ZoomableImageView(Context c) { super(c); init(c); }
     public ZoomableImageView(Context c, AttributeSet a) { super(c, a); init(c); }
@@ -52,7 +60,9 @@ public class ZoomableImageView extends ImageView {
 
     private void init(Context c) {
         super.setScaleType(ScaleType.MATRIX);
-        touchSlop = ViewConfiguration.get(c).getScaledTouchSlop();
+        ViewConfiguration vc = ViewConfiguration.get(c);
+        touchSlop = vc.getScaledTouchSlop();
+        minFlingVelocity = vc.getScaledMinimumFlingVelocity() * 3;
         scaleDetector = new ScaleGestureDetector(c, new ScaleListener());
         gestureDetector = new GestureDetector(c, new GestureListener());
     }
@@ -63,6 +73,14 @@ public class ZoomableImageView extends ImageView {
 
     public void setCompareListener(CompareListener l) {
         this.compareListener = l;
+    }
+
+    public void setNavigationListener(NavigationListener l) {
+        this.navListener = l;
+    }
+
+    private boolean isAtBaseScale() {
+        return currentScale() <= baseScale * 1.05f;
     }
 
     /** Sets a new image and refits to the view. */
@@ -227,6 +245,18 @@ public class ZoomableImageView extends ImageView {
             fixTranslation();
             setImageMatrix(matrix);
             return true;
+        }
+
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+            if (navListener != null && isAtBaseScale()
+                    && Math.abs(velocityX) > Math.abs(velocityY)
+                    && Math.abs(velocityX) > minFlingVelocity) {
+                if (velocityX < 0) navListener.onSwipeNext();
+                else navListener.onSwipePrev();
+                return true;
+            }
+            return false;
         }
 
         @Override

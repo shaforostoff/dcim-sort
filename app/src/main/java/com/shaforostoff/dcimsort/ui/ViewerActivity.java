@@ -10,6 +10,7 @@ import android.util.DisplayMetrics;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.widget.Button;
 import android.widget.TextView;
 
 import com.shaforostoff.dcimsort.R;
@@ -21,6 +22,7 @@ import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.work.Recompressor;
 
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -32,7 +34,10 @@ public class ViewerActivity extends Activity {
 
     private ZoomableImageView imageView;
     private TextView overlay, hint;
+    private Button btnExclude;
 
+    private List<MediaImage> images;
+    private int currentIndex;
     private MediaImage image;
     private CompressMode mode;
     private int quality;
@@ -43,6 +48,7 @@ public class ViewerActivity extends Activity {
     private String overlayText;
     private boolean holding;            // finger currently held for compare
     private boolean compressionStarted; // build kicked off once, lazily, on first hold
+    private int generation;             // incremented on navigation to cancel stale async tasks
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,33 +57,53 @@ public class ViewerActivity extends Activity {
         imageView = findViewById(R.id.image);
         overlay = findViewById(R.id.overlay);
         hint = findViewById(R.id.hint);
+        btnExclude = findViewById(R.id.btn_exclude);
 
         ViewerData data = ViewerData.take();
         if (data == null || data.image == null) {
             finish();
             return;
         }
-        image = data.image;
+        images = data.images;
+        currentIndex = data.index;
+        image = (images != null && currentIndex >= 0 && currentIndex < images.size())
+                ? images.get(currentIndex) : data.image;
         mode = data.mode != null ? data.mode : CompressMode.NONE;
         quality = data.quality;
         skipFav = data.skipFav;
 
-        applyBottomInsets();
-        loadOriginal();
+        // Swipe navigation between photos (only when there are multiple images).
+        if (images != null && images.size() > 1) {
+            imageView.setNavigationListener(new ZoomableImageView.NavigationListener() {
+                @Override public void onSwipePrev() { navigateTo(currentIndex - 1); }
+                @Override public void onSwipeNext() { navigateTo(currentIndex + 1); }
+            });
+        }
+
+        // Exclude / Include toggle button.
+        updateExcludeButton();
+        btnExclude.setOnClickListener(v -> {
+            SelectionStore.toggle(image.key());
+            updateExcludeButton();
+        });
 
         if (mode.recompresses()) {
+            // Set listener once; it captures fields by reference so navigation updates it implicitly.
+            imageView.setCompareListener(new ZoomableImageView.CompareListener() {
+                @Override public void onCompareStart() { startCompare(); }
+                @Override public void onCompareEnd() { endCompare(); }
+            });
             hint.setVisibility(View.VISIBLE);
             if (skipFav && image.favorite) {
                 hint.setText(R.string.favorite_no_compress);
             } else {
                 imageView.setCompareEnabled(true);
-                imageView.setCompareListener(new ZoomableImageView.CompareListener() {
-                    @Override public void onCompareStart() { startCompare(); }
-                    @Override public void onCompareEnd() { endCompare(); }
-                });
                 // Compression is deferred until the user actually holds (see startCompare).
             }
         }
+
+        applyBottomInsets();
+        loadOriginal();
     }
 
     /** Hold began: show the compressed bitmap, building it on first hold only. */
@@ -123,13 +149,20 @@ public class ViewerActivity extends Activity {
         final MediaRepository repo = new MediaRepository(this);
         final Recompressor rc = new Recompressor(this, repo);
         final int maxDim = screenMaxDim();
+        final MediaImage target = image;
+        final int gen = generation;
         executor.execute(() -> {
-            final Bitmap bmp = rc.decodeOriented(image.readUri(), maxDim);
+            final Bitmap bmp = rc.decodeOriented(target.readUri(), maxDim);
             main.post(() -> {
+                if (gen != generation) {
+                    if (bmp != null) bmp.recycle();
+                    return;
+                }
                 if (bmp == null) {
                     finish();
                     return;
                 }
+                if (originalBitmap != null) originalBitmap.recycle();
                 originalBitmap = bmp;
                 imageView.setImageFitted(bmp);
             });
@@ -139,8 +172,10 @@ public class ViewerActivity extends Activity {
     private void buildCompressed() {
         final MediaRepository repo = new MediaRepository(this);
         final Recompressor rc = new Recompressor(this, repo);
+        final MediaImage target = image;
+        final int gen = generation;
         executor.execute(() -> {
-            File temp = rc.compressToTemp(image.readUri(), mode, quality);
+            File temp = rc.compressToTemp(target.readUri(), mode, quality);
             if (temp == null) return;
             long compSize = temp.length();
             Bitmap bmp = BitmapFactory.decodeFile(temp.getAbsolutePath());
@@ -149,6 +184,10 @@ public class ViewerActivity extends Activity {
             final long fcompSize = compSize;
             final Bitmap fbmp = bmp;
             main.post(() -> {
+                if (gen != generation) {
+                    fbmp.recycle();
+                    return;
+                }
                 // Match the displayed original's pixel dimensions so the matrix maps identically.
                 Bitmap toUse = fbmp;
                 if (originalBitmap != null
@@ -160,21 +199,58 @@ public class ViewerActivity extends Activity {
                 }
                 compressedBitmap = toUse;
                 overlayText = getString(R.string.compare_overlay,
-                        Formatter.humanReadableBytes(image.size),
+                        Formatter.humanReadableBytes(target.size),
                         Formatter.humanReadableBytes(fcompSize));
                 if (holding) showCompressed(); // finger still down → reveal as soon as it's ready
             });
         });
     }
 
-    /** Lift the bottom hint/overlay above the system navigation bar (edge-to-edge on API 35+). */
+    private void navigateTo(int index) {
+        if (images == null || index < 0 || index >= images.size()) return;
+        generation++;
+        currentIndex = index;
+        image = images.get(currentIndex);
+
+        // Reset compare state for the new image.
+        holding = false;
+        compressionStarted = false;
+        if (compressedBitmap != null) {
+            compressedBitmap.recycle();
+            compressedBitmap = null;
+        }
+        overlayText = null;
+        overlay.setVisibility(View.GONE);
+
+        if (mode.recompresses()) {
+            hint.setVisibility(View.VISIBLE);
+            if (skipFav && image.favorite) {
+                hint.setText(R.string.favorite_no_compress);
+                imageView.setCompareEnabled(false);
+            } else {
+                hint.setText(R.string.hold_to_compare);
+                imageView.setCompareEnabled(true);
+            }
+        }
+
+        updateExcludeButton();
+        loadOriginal();
+    }
+
+    private void updateExcludeButton() {
+        btnExclude.setText(SelectionStore.isSelected(image.key())
+                ? R.string.exclude : R.string.include);
+    }
+
+    /** Lift the bottom hint/overlay/button above the system navigation bar (edge-to-edge on API 35+). */
     private void applyBottomInsets() {
-        final int hintBase = Math.round(16 * getResources().getDisplayMetrics().density);
+        final int base16 = Math.round(16 * getResources().getDisplayMetrics().density);
         View root = findViewById(android.R.id.content);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int bottom = bottomInset(insets);
-            setBottomMargin(hint, hintBase + bottom);
+            setBottomMargin(hint, base16 + bottom);
             setBottomMargin(overlay, bottom);
+            setBottomMargin(btnExclude, base16 + bottom);
             return insets;
         });
         root.requestApplyInsets();

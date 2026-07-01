@@ -109,12 +109,11 @@ public class PreviewActivity extends Activity {
         thumbLoader = new ThumbnailLoader(this, (int) (110 * density));
 
         folderList.setOnItemClickListener((p, v, pos, id) -> openFolder(folders.get(pos)));
-        photoGrid.setOnItemClickListener((p, v, pos, id) -> openViewer(openFolderRef.images.get(pos)));
-        photoGrid.setOnItemLongClickListener((p, v, pos, id) -> {
-            SelectionStore.toggle(openFolderRef.images.get(pos).key());
-            refreshGrid();
-            return true;
-        });
+        photoGrid.setOnItemClickListener((p, v, pos, id) -> openViewer(pos));
+        photoGrid.setOnTouchListener(new DragSelectionHelper(
+                photoGrid,
+                () -> openFolderRef != null ? openFolderRef.images : java.util.Collections.emptyList(),
+                this::refreshGrid));
         btnSelectToggle.setOnClickListener(v -> {
             if (SelectionStore.allSelected(openFolderRef.images)) {
                 SelectionStore.deselectAll(openFolderRef.images);
@@ -294,9 +293,11 @@ public class PreviewActivity extends Activity {
         setTitle(pf.name != null ? pf.name : getString(R.string.title_preview));
     }
 
-    private void openViewer(MediaImage img) {
+    private void openViewer(int index) {
         ViewerData d = new ViewerData();
-        d.image = img;
+        d.images = openFolderRef.images;
+        d.index = index;
+        d.image = openFolderRef.images.get(index);
         d.mode = mode;
         d.quality = quality;
         d.skipFav = skipFav;
