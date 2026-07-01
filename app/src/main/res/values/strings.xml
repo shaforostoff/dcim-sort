@@ -13,10 +13,15 @@
     <string name="photos_count_size">%1$d photos · %2$s</string>
     <string name="photos_count_only">%1$d photos</string>
 
+    <string name="groupfolder_label">Group into folders</string>
+    <string name="groupmode_none">No</string>
+    <string name="groupmode_placemonth">Place-Month</string>
+    <string name="groupmode_placeday">Place-Day</string>
+
     <string name="recompress_label">Recompression</string>
-    <string name="mode_none">Do not recompress</string>
-    <string name="mode_webp">WebP</string>
-    <string name="mode_heic">HEIC</string>
+    <string name="compressmode_none">No</string>
+    <string name="compressmode_webp">WebP</string>
+    <string name="compressmode_heic">HEIC</string>
     <string name="quality_label">Quality: %1$d</string>
     <string name="skip_favorites">Do not compress photos marked as favorite</string>
 

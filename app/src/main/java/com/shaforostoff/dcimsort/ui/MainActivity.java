@@ -27,6 +27,7 @@ import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.Bucket;
 import com.shaforostoff.dcimsort.data.CompressMode;
 import com.shaforostoff.dcimsort.data.DateRange;
+import com.shaforostoff.dcimsort.data.GroupMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.data.SettingsStore;
@@ -64,6 +65,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private TextView txtFolder, txtStats, txtQuality, txtProgress, txtPlan;
     private RadioGroup radioMode;
     private RadioButton radioNone, radioWebp, radioHeic;
+    private RadioGroup radioGroupMode;
+    private RadioButton radioGroupNone, radioGroupPlaceMonth, radioGroupPlaceDay;
     private LinearLayout qualityGroup, progressGroup;
     private SeekBar seekQuality;
     private CheckBox checkSkipFav;
@@ -84,6 +87,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // Pending organize job + consent queue
     private List<MediaImage> pendingImages;
     private CompressMode pendingMode;
+    private GroupMode pendingGroupMode;
     private int pendingQuality;
     private boolean pendingSkipFav;
     private String pendingRel, pendingDir;
@@ -120,14 +124,18 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         btnBrowse = findViewById(R.id.btn_browse);
         txtFolder = findViewById(R.id.txt_folder);
         txtStats = findViewById(R.id.txt_stats);
-        radioMode = findViewById(R.id.radio_mode);
-        radioNone = findViewById(R.id.radio_none);
-        radioWebp = findViewById(R.id.radio_webp);
-        radioHeic = findViewById(R.id.radio_heic);
+        radioMode = findViewById(R.id.radio_compressmode);
+        radioNone = findViewById(R.id.radio_compressnone);
+        radioWebp = findViewById(R.id.radio_compresswebp);
+        radioHeic = findViewById(R.id.radio_compressheic);
         qualityGroup = findViewById(R.id.quality_group);
         txtQuality = findViewById(R.id.txt_quality);
         seekQuality = findViewById(R.id.seek_quality);
         checkSkipFav = findViewById(R.id.check_skip_fav);
+        radioGroupMode = findViewById(R.id.radio_groupmode);
+        radioGroupNone = findViewById(R.id.radio_groupnone);
+        radioGroupPlaceMonth = findViewById(R.id.radio_groupplacemonth);
+        radioGroupPlaceDay = findViewById(R.id.radio_groupplaceday);
         btnDateFrom = findViewById(R.id.btn_date_from);
         btnDateTo = findViewById(R.id.btn_date_to);
         txtPlan = findViewById(R.id.txt_plan);
@@ -161,6 +169,9 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             CompressMode mode = currentMode();
             settings.setMode(mode);
             qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
+            if (Sdk.atLeastR()) {
+                checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
+            }
             recomputeSummary();
         });
 
@@ -178,6 +189,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         checkSkipFav.setOnCheckedChangeListener((b, checked) -> {
             settings.setSkipFavorites(checked);
             recomputeSummary();
+        });
+
+        radioGroupMode.setOnCheckedChangeListener((group, checkedId) -> {
+            settings.setGroupMode(currentGroupMode());
         });
 
         btnDateFrom.setOnClickListener(v -> pickDate(true));
@@ -202,16 +217,31 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             default: radioNone.setChecked(true); break;
         }
         qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
+        if (Sdk.atLeastR()) {
+            checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
+        }
         int q = settings.getQuality();
         seekQuality.setProgress(q);
         txtQuality.setText(getString(R.string.quality_label, q));
         checkSkipFav.setChecked(settings.getSkipFavorites());
+        switch (settings.getGroupMode()) {
+            case NONE: radioGroupNone.setChecked(true); break;
+            case PLACE_DAY: radioGroupPlaceDay.setChecked(true); break;
+            default: radioGroupPlaceMonth.setChecked(true); break;
+        }
+    }
+
+    private GroupMode currentGroupMode() {
+        int id = radioGroupMode.getCheckedRadioButtonId();
+        if (id == R.id.radio_groupnone) return GroupMode.NONE;
+        if (id == R.id.radio_groupplaceday) return GroupMode.PLACE_DAY;
+        return GroupMode.PLACE_MONTH;
     }
 
     private CompressMode currentMode() {
         int id = radioMode.getCheckedRadioButtonId();
-        if (id == R.id.radio_webp) return CompressMode.WEBP;
-        if (id == R.id.radio_heic) return CompressMode.HEIC;
+        if (id == R.id.radio_compresswebp) return CompressMode.WEBP;
+        if (id == R.id.radio_compressheic) return CompressMode.HEIC;
         return CompressMode.NONE;
     }
 
@@ -461,6 +491,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         i.putExtra(Extras.VOLUME_NAME, volumeName);
         i.putExtra(Extras.DISPLAY, displayName);
         i.putExtra(Extras.MODE, currentMode().name());
+        i.putExtra(Extras.GROUP_MODE, currentGroupMode().name());
         i.putExtra(Extras.QUALITY, seekQuality.getProgress());
         i.putExtra(Extras.SKIP_FAV, checkSkipFav.isChecked() && Sdk.atLeastR());
         i.putExtra(Extras.DATE_FROM, rangeFrom);
@@ -488,12 +519,12 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             return;
         }
         setBusy(true);
-        onImagesGathered(imgs, currentMode(), seekQuality.getProgress(),
+        onImagesGathered(imgs, currentMode(), currentGroupMode(), seekQuality.getProgress(),
                 checkSkipFav.isChecked() && Sdk.atLeastR(), relPath, dataDir);
     }
 
-    private void onImagesGathered(List<MediaImage> imgs, CompressMode mode, int quality,
-                                  boolean skipFav, String rel, String dir) {
+    private void onImagesGathered(List<MediaImage> imgs, CompressMode mode, GroupMode groupMode,
+                                  int quality, boolean skipFav, String rel, String dir) {
         if (imgs.isEmpty()) {
             setBusy(false);
             toast(R.string.no_photos);
@@ -501,6 +532,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         }
         pendingImages = imgs;
         pendingMode = mode;
+        pendingGroupMode = groupMode;
         pendingQuality = quality;
         pendingSkipFav = skipFav;
         pendingRel = rel;
@@ -556,6 +588,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         OrganizeRequest req = new OrganizeRequest();
         req.images = pendingImages;
         req.mode = pendingMode;
+        req.groupMode = pendingGroupMode;
         req.quality = pendingQuality;
         req.skipFavorites = pendingSkipFav;
         req.sourceRelativePath = pendingRel;

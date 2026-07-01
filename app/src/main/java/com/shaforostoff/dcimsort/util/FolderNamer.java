@@ -18,19 +18,28 @@ public final class FolderNamer {
     public static String folderName(long dateTakenMillis, String place) {
         String ym = yearMonth(dateTakenMillis);
         String safePlace = sanitize(place);
-        if (safePlace == null) {
-            return ym;
-        }
-        return safePlace + "-" + ym;
+        return safePlace == null ? ym : safePlace + "-" + ym;
+    }
+
+    public static String folderNameDay(long dateTakenMillis, String place) {
+        String ymd = yearMonthDay(dateTakenMillis);
+        String safePlace = sanitize(place);
+        return safePlace == null ? ymd : safePlace + "-" + ymd;
     }
 
     private static String yearMonth(long millis) {
-        if (millis <= 0) {
-            return "unknown-date";
-        }
+        if (millis <= 0) return "unknown-date";
         Calendar c = Calendar.getInstance(TimeZone.getDefault());
         c.setTimeInMillis(millis);
         return String.format(Locale.US, "%04d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1);
+    }
+
+    private static String yearMonthDay(long millis) {
+        if (millis <= 0) return "unknown-date";
+        Calendar c = Calendar.getInstance(TimeZone.getDefault());
+        c.setTimeInMillis(millis);
+        return String.format(Locale.US, "%04d-%02d-%02d",
+                c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
     }
 
     /** Returns a filesystem-safe place token, or null if the input is empty after cleaning. */

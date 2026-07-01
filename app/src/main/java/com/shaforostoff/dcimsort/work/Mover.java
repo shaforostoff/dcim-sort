@@ -46,6 +46,7 @@ public class Mover {
         String base = sourceRel;
         if (base == null || base.isEmpty()) base = "DCIM/Camera/";
         if (!base.endsWith("/")) base += "/";
+        if (folder == null || folder.isEmpty()) return base;
         return base + folder + "/";
     }
 
@@ -70,6 +71,7 @@ public class Mover {
     // ---- Move (no recompress) ----------------------------------------------
 
     public Outcome move(MediaImage img, String sourceRel, String folder) {
+        if (folder == null) return Outcome.SKIPPED;
         if (Sdk.atLeastQ()) {
             return moveViaMediaStore(img, sourceRel, folder);
         }

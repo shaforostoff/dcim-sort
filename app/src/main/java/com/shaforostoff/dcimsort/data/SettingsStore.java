@@ -3,6 +3,8 @@ package com.shaforostoff.dcimsort.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.shaforostoff.dcimsort.data.GroupMode;
+
 /** Persists the selected source folder and compression settings across app restarts. */
 public class SettingsStore {
     private static final String PREFS = "dcimsort_settings";
@@ -13,6 +15,7 @@ public class SettingsStore {
     private static final String K_DATA_PATH = "source_data_path";
     private static final String K_VOLUME = "source_volume_name";
     private static final String K_MODE = "compress_mode";
+    private static final String K_GROUP_MODE = "group_mode";
     private static final String K_QUALITY = "quality";
     private static final String K_SKIP_FAV = "skip_favorites";
 
@@ -49,6 +52,14 @@ public class SettingsStore {
 
     public void setMode(CompressMode mode) {
         prefs.edit().putString(K_MODE, mode.name()).apply();
+    }
+
+    public GroupMode getGroupMode() {
+        return GroupMode.fromName(prefs.getString(K_GROUP_MODE, GroupMode.PLACE_MONTH.name()), GroupMode.PLACE_MONTH);
+    }
+
+    public void setGroupMode(GroupMode mode) {
+        prefs.edit().putString(K_GROUP_MODE, mode.name()).apply();
     }
 
     public int getQuality() { return prefs.getInt(K_QUALITY, 80); }

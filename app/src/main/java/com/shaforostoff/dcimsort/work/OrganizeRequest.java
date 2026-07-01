@@ -1,6 +1,7 @@
 package com.shaforostoff.dcimsort.work;
 
 import com.shaforostoff.dcimsort.data.CompressMode;
+import com.shaforostoff.dcimsort.data.GroupMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
 
 import java.util.List;
@@ -12,6 +13,7 @@ import java.util.List;
 public class OrganizeRequest {
     public List<MediaImage> images;     // newest-first
     public CompressMode mode;
+    public GroupMode groupMode;
     public int quality;
     public boolean skipFavorites;
     public String sourceRelativePath;   // e.g. "DCIM/Camera/"

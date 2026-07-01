@@ -14,6 +14,7 @@ import android.widget.TextView;
 import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.CompressMode;
 import com.shaforostoff.dcimsort.data.DateRange;
+import com.shaforostoff.dcimsort.data.GroupMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.geo.GeoCache;
@@ -50,6 +51,7 @@ public class PreviewActivity extends Activity {
 
     private String relPath, dataDir, volumeName;
     private CompressMode mode;
+    private GroupMode groupMode;
     private int quality;
     private boolean skipFav;
     private DateRange range;
@@ -57,6 +59,7 @@ public class PreviewActivity extends Activity {
 
     private List<PlanFolder> folders;
     private PlanFolder openFolderRef;
+    private boolean foldersSkipped;
 
     private static final class PlanFolder {
         final String name;
@@ -78,6 +81,7 @@ public class PreviewActivity extends Activity {
         dataDir = getIntent().getStringExtra(Extras.DATA_DIR);
         volumeName = getIntent().getStringExtra(Extras.VOLUME_NAME);
         mode = CompressMode.fromName(getIntent().getStringExtra(Extras.MODE), CompressMode.NONE);
+        groupMode = GroupMode.fromName(getIntent().getStringExtra(Extras.GROUP_MODE), GroupMode.PLACE_MONTH);
         quality = getIntent().getIntExtra(Extras.QUALITY, 80);
         skipFav = getIntent().getBooleanExtra(Extras.SKIP_FAV, false);
         long from = getIntent().getLongExtra(Extras.DATE_FROM, Long.MIN_VALUE);
@@ -102,7 +106,7 @@ public class PreviewActivity extends Activity {
 
         final MediaRepository repo = new MediaRepository(this);
         final TargetResolver targets = new TargetResolver(
-                new GeoExtractor(repo), new PlaceResolver(this, new GeoCache(this)));
+                new GeoExtractor(repo), new PlaceResolver(this, new GeoCache(this)), groupMode);
 
         executor.execute(() -> {
             final Map<String, PlanFolder> map = new LinkedHashMap<>();
@@ -145,6 +149,11 @@ public class PreviewActivity extends Activity {
             status.setText(R.string.preview_empty);
             return;
         }
+        if (groupMode == GroupMode.NONE) {
+            foldersSkipped = true;
+            openFolder(list.get(0));
+            return;
+        }
         status.setVisibility(View.GONE);
         photoGrid.setVisibility(View.GONE);
         folderList.setVisibility(View.VISIBLE);
@@ -161,10 +170,11 @@ public class PreviewActivity extends Activity {
 
     private void openFolder(PlanFolder pf) {
         openFolderRef = pf;
+        status.setVisibility(View.GONE);
         folderList.setVisibility(View.GONE);
         photoGrid.setVisibility(View.VISIBLE);
         photoGrid.setAdapter(new PhotoAdapter(this, pf.images, thumbLoader));
-        setTitle(pf.name);
+        setTitle(pf.name != null ? pf.name : getString(R.string.title_preview));
     }
 
     private void openViewer(MediaImage img) {
@@ -179,7 +189,7 @@ public class PreviewActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (photoGrid.getVisibility() == View.VISIBLE) {
+        if (photoGrid.getVisibility() == View.VISIBLE && !foldersSkipped) {
             photoGrid.setVisibility(View.GONE);
             folderList.setVisibility(View.VISIBLE);
             openFolderRef = null;

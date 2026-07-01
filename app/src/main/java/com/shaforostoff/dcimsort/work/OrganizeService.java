@@ -107,7 +107,8 @@ public class OrganizeService extends Service {
         GeoCache cache = new GeoCache(this);
         GeoExtractor geo = new GeoExtractor(repo);
         PlaceResolver places = new PlaceResolver(this, cache);
-        TargetResolver targets = new TargetResolver(geo, places);
+        TargetResolver targets = new TargetResolver(geo, places,
+                req.groupMode != null ? req.groupMode : com.shaforostoff.dcimsort.data.GroupMode.PLACE_MONTH);
         OrganizeJournal journal = new OrganizeJournal(this);
         journal.reconcile(resolver);
         Mover mover = new Mover(this, journal);

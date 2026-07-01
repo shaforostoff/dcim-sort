@@ -53,30 +53,30 @@
             android:textStyle="bold" />
 
         <RadioGroup
-            android:id="@+id/radio_mode"
+            android:id="@+id/radio_compressmode"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:orientation="vertical">
+            android:orientation="horizontal">
 
             <RadioButton
-                android:id="@+id/radio_none"
-                android:layout_width="match_parent"
+                android:id="@+id/radio_compressnone"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="true"
-                android:text="@string/mode_none" />
+                android:text="@string/compressmode_none" />
 
             <RadioButton
-                android:id="@+id/radio_webp"
-                android:layout_width="match_parent"
+                android:id="@+id/radio_compresswebp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/mode_webp" />
+                android:text="@string/compressmode_webp" />
 
             <RadioButton
-                android:id="@+id/radio_heic"
-                android:layout_width="match_parent"
+                android:id="@+id/radio_compressheic"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/mode_heic" />
+                android:text="@string/compressmode_heic" />
         </RadioGroup>
 
         <!-- Quality -->
@@ -108,6 +108,42 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="@string/skip_favorites" />
+
+        <!-- Group into folders -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/groupfolder_label"
+            android:textAllCaps="true"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/radio_groupmode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radio_groupnone"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/groupmode_none" />
+
+            <RadioButton
+                android:id="@+id/radio_groupplacemonth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="@string/groupmode_placemonth" />
+
+            <RadioButton
+                android:id="@+id/radio_groupplaceday"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/groupmode_placeday" />
+        </RadioGroup>
 
         <!-- Date range -->
         <TextView
