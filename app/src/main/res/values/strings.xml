@@ -54,6 +54,7 @@
     <!-- Viewer -->
     <string name="compare_overlay">%1$s → %2$s</string>
     <string name="hold_to_compare">Hold to compare compressed</string>
+    <string name="compressing">Compressing…</string>
 
     <!-- Misc -->
     <string name="unknown_place">Unknown</string>

@@ -20,7 +20,6 @@ import com.shaforostoff.dcimsort.geo.GeoCache;
 import com.shaforostoff.dcimsort.geo.GeoExtractor;
 import com.shaforostoff.dcimsort.geo.PlaceResolver;
 import com.shaforostoff.dcimsort.util.Formatter;
-import com.shaforostoff.dcimsort.work.Recompressor;
 import com.shaforostoff.dcimsort.work.SizeEstimator;
 import com.shaforostoff.dcimsort.work.TargetResolver;
 
@@ -33,7 +32,10 @@ import java.util.concurrent.Executors;
 
 /**
  * Dry-run of the organize plan: groups photos into Place-YYYY-MM folders with counts and an
- * estimated post-compression size. Tap a folder to see its photos; tap a photo to view fullscreen.
+ * estimated post-compression size. The size uses the bytes-per-megapixel ratio the main screen
+ * already calibrated (passed in via Intent) — Preview never re-encodes to estimate. Actual
+ * re-encoding only happens in the viewer's hold-to-compare gesture. Tap a folder to see its
+ * photos; tap a photo to view fullscreen.
  */
 public class PreviewActivity extends Activity {
 
@@ -51,6 +53,7 @@ public class PreviewActivity extends Activity {
     private int quality;
     private boolean skipFav;
     private DateRange range;
+    private double estimateRatio; // bytes/MP from the plan summary; 0 → fall back to the default
 
     private List<PlanFolder> folders;
     private PlanFolder openFolderRef;
@@ -79,6 +82,7 @@ public class PreviewActivity extends Activity {
         long from = getIntent().getLongExtra(Extras.DATE_FROM, Long.MIN_VALUE);
         long to = getIntent().getLongExtra(Extras.DATE_TO, Long.MAX_VALUE);
         range = new DateRange(from, to);
+        estimateRatio = getIntent().getDoubleExtra(Extras.RATIO, 0);
 
         float density = getResources().getDisplayMetrics().density;
         thumbLoader = new ThumbnailLoader(this, (int) (110 * density));
@@ -98,7 +102,6 @@ public class PreviewActivity extends Activity {
         final MediaRepository repo = new MediaRepository(this);
         final TargetResolver targets = new TargetResolver(
                 new GeoExtractor(repo), new PlaceResolver(this, new GeoCache(this)));
-        final Recompressor rc = new Recompressor(this, repo);
 
         executor.execute(() -> {
             final Map<String, PlanFolder> map = new LinkedHashMap<>();
@@ -116,21 +119,19 @@ public class PreviewActivity extends Activity {
                 return true;
             });
             final List<PlanFolder> list = new ArrayList<>(map.values());
-            estimate(list, rc);
+            estimate(list);
             if (cancelled) return;
             main.post(() -> showFolders(list));
         });
     }
 
-    private void estimate(List<PlanFolder> list, Recompressor rc) {
+    private void estimate(List<PlanFolder> list) {
         if (!mode.recompresses()) {
             for (PlanFolder pf : list) pf.estBytes = pf.currentBytes;
             return;
         }
-        // Calibrate one ratio across all in-range images, then apply it per folder.
-        List<MediaImage> all = new ArrayList<>();
-        for (PlanFolder pf : list) all.addAll(pf.images);
-        double ratio = SizeEstimator.calibrateRatio(all, mode, quality, rc, () -> cancelled);
+        // Reuse the ratio the main screen already calibrated; no re-encoding here.
+        double ratio = estimateRatio > 0 ? estimateRatio : SizeEstimator.defaultRatio(mode);
         for (PlanFolder pf : list) {
             pf.estBytes = SizeEstimator.estimateWithRatio(pf.images, ratio, mode, skipFav);
         }

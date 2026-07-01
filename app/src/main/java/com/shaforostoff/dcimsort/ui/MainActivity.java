@@ -54,7 +54,6 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private static final int CONSENT_CHUNK = 480;
 
     private static final int CONSENT_WRITE = 0;
-    private static final int CONSENT_DELETE = 1;
 
     private SettingsStore settings;
     private MediaRepository repo;
@@ -80,6 +79,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private long folderMinDate, folderMaxDate; // span of dated photos; 0 if none
     private long rangeFrom = Long.MIN_VALUE, rangeTo = Long.MAX_VALUE;
     private int summaryGen;
+    private volatile double lastEstimateRatio; // last calibrated bytes/MP; handed to Preview so it needn't re-encode
 
     // Pending organize job + consent queue
     private List<MediaImage> pendingImages;
@@ -413,8 +413,11 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         txtPlan.setText(getString(R.string.plan_estimating, count));
         final Recompressor rc = new Recompressor(this, repo);
         executor.execute(() -> {
-            long est = SizeEstimator.estimateTotal(
-                    inRange, mode, quality, skipFav, rc, () -> gen != summaryGen);
+            double ratio = SizeEstimator.calibrateRatio(
+                    inRange, mode, quality, rc, () -> gen != summaryGen);
+            long est = SizeEstimator.estimateWithRatio(inRange, ratio, mode, skipFav);
+            if (gen != summaryGen) return;
+            lastEstimateRatio = ratio; // reused by Preview instead of re-encoding samples
             main.post(() -> {
                 if (gen == summaryGen) {
                     txtPlan.setText(getString(R.string.plan_summary_estimated, count,
@@ -433,6 +436,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         }
         Intent i = new Intent(this, PreviewActivity.class);
         putFolderExtras(i);
+        i.putExtra(Extras.RATIO, lastEstimateRatio); // 0 if not yet calibrated → Preview uses its default
         startActivity(i);
     }
 
@@ -487,7 +491,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         pendingDir = dir;
 
         if (Sdk.atLeastR()) {
-            buildConsentQueue(imgs, mode, skipFav);
+            buildConsentQueue(imgs);
             consentIndex = 0;
             processNextConsent();
         } else {
@@ -495,20 +499,16 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         }
     }
 
-    private void buildConsentQueue(List<MediaImage> imgs, CompressMode mode, boolean skipFav) {
+    private void buildConsentQueue(List<MediaImage> imgs) {
         consentQueue = new ArrayList<>();
+        // Both moving (RELATIVE_PATH update) and recompressing (write a replacement, then delete the
+        // original) need WRITE access to each original. We must NOT use createDeleteRequest here: it
+        // deletes the originals the instant the user approves — before any replacement is written —
+        // so any later failure loses the photo with nothing to show for it. Mover deletes each
+        // original itself, only after its recompressed replacement has been written and verified.
         List<Uri> writeUris = new ArrayList<>();
-        List<Uri> deleteUris = new ArrayList<>();
-        if (!mode.recompresses()) {
-            for (MediaImage m : imgs) writeUris.add(m.contentUri());
-        } else {
-            for (MediaImage m : imgs) {
-                if (skipFav && m.favorite) writeUris.add(m.contentUri());
-                else deleteUris.add(m.contentUri());
-            }
-        }
+        for (MediaImage m : imgs) writeUris.add(m.contentUri());
         addChunks(CONSENT_WRITE, writeUris);
-        addChunks(CONSENT_DELETE, deleteUris);
     }
 
     private void addChunks(int type, List<Uri> uris) {
@@ -527,11 +527,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         ContentResolver resolver = getContentResolver();
         PendingIntent pi;
         try {
-            if (step.type == CONSENT_WRITE) {
-                pi = MediaStore.createWriteRequest(resolver, step.uris);
-            } else {
-                pi = MediaStore.createDeleteRequest(resolver, step.uris);
-            }
+            // Always a write grant — never createDeleteRequest, which would delete up front.
+            pi = MediaStore.createWriteRequest(resolver, step.uris);
             startIntentSenderForResult(pi.getIntentSender(), REQ_CONSENT, null, 0, 0, 0);
         } catch (IntentSender.SendIntentException | RuntimeException e) {
             setBusy(false);
