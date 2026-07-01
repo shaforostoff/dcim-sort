@@ -20,6 +20,7 @@ import com.shaforostoff.dcimsort.data.DateRange;
 import com.shaforostoff.dcimsort.data.GroupMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
+import com.shaforostoff.dcimsort.geo.CoordCache;
 import com.shaforostoff.dcimsort.geo.GeoCache;
 import com.shaforostoff.dcimsort.geo.GeoExtractor;
 import com.shaforostoff.dcimsort.geo.PlaceResolver;
@@ -46,6 +47,7 @@ public class PreviewActivity extends Activity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean cancelled = false;
+    private volatile java.util.concurrent.ExecutorService geoPool;
 
     private ListView folderList;
     private GridView photoGrid;
@@ -138,52 +140,79 @@ public class PreviewActivity extends Activity {
 
         final MediaRepository repo = new MediaRepository(this);
         final GeoCache cache = new GeoCache(this);
+        final CoordCache coordCache = new CoordCache(this);
         final TargetResolver targets = new TargetResolver(
-                new GeoExtractor(repo), new PlaceResolver(this, cache), groupMode);
+                new GeoExtractor(repo), new PlaceResolver(this, cache), groupMode, coordCache);
 
         executor.execute(() -> {
-            // Phase 1: collect rows (fast — just MediaStore reads, no geocoding) to get a total.
+            // Phase 1: collect rows that pass the date filter (fast — just MediaStore reads, no
+            // geocoding) so we have a total to drive the progress bar.
             final List<MediaImage> images = new ArrayList<>();
             if (fileUris != null && !fileUris.isEmpty()) {
                 List<android.net.Uri> uris = new ArrayList<>(fileUris.size());
                 for (String s : fileUris) uris.add(android.net.Uri.parse(s));
-                images.addAll(repo.fetchByUris(uris));
+                for (MediaImage img : repo.fetchByUris(uris)) {
+                    if (range.contains(img.dateTakenMillis)) images.add(img);
+                }
             } else {
                 repo.forEachNewestFirst(relPath, dataDir, volumeName, img -> {
                     if (cancelled) return false;
-                    images.add(img);
+                    if (range.contains(img.dateTakenMillis)) images.add(img);
                     return true;
                 });
             }
             if (cancelled) return;
 
-            // Phase 2: group with geocoding (the slow part), reporting progress per image.
             final int total = images.size();
-            // Update at most ~100 times to avoid flooding the main thread with posts.
-            final int step = Math.max(1, total / 100);
             main.post(() -> startProgress(total));
 
-            final Map<String, PlanFolder> map = new LinkedHashMap<>();
-            int processed = 0;
-            for (MediaImage img : images) {
-                if (cancelled) return;
-                if (range.contains(img.dateTakenMillis)) {
-                    String name = targets.folderFor(img);
-                    PlanFolder pf = map.get(name);
-                    if (pf == null) {
-                        pf = new PlanFolder(name);
-                        map.put(name, pf);
+            // Phase 2: resolve each image's folder name in parallel. EXIF reads and geocoder
+            // lookups are I/O/IPC-bound and independent, so a small pool overlaps them; results go
+            // into an indexed array so grouping order stays exactly newest-first.
+            final String[] names = new String[total];
+            final java.util.concurrent.atomic.AtomicInteger doneCount =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            final int step = Math.max(1, total / 100); // cap UI updates at ~100
+            int workers = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() * 2));
+            geoPool = new java.util.concurrent.ThreadPoolExecutor(
+                    workers, workers, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+                    new java.util.concurrent.LinkedBlockingQueue<>(),
+                    com.shaforostoff.dcimsort.util.ThreadPlanner.backgroundFactory("preview-geo"));
+            for (int i = 0; i < total; i++) {
+                final int idx = i;
+                final MediaImage img = images.get(i);
+                geoPool.execute(() -> {
+                    if (cancelled) return;
+                    names[idx] = targets.folderFor(img);
+                    int d = doneCount.incrementAndGet();
+                    if (d % step == 0 || d == total) {
+                        main.post(() -> updateProgress(d, total));
                     }
-                    pf.images.add(img);
-                    pf.currentBytes += img.size;
-                }
-                processed++;
-                if (processed % step == 0 || processed == total) {
-                    final int done = processed;
-                    main.post(() -> updateProgress(done, total));
-                }
+                });
             }
-            cache.flush(); // persist newly resolved places so the next Preview reuses them
+            geoPool.shutdown();
+            try {
+                geoPool.awaitTermination(10, java.util.concurrent.TimeUnit.MINUTES);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                geoPool.shutdownNow();
+            }
+            if (cancelled) return;
+
+            // Phase 3: group serially in original order using the resolved names.
+            final Map<String, PlanFolder> map = new LinkedHashMap<>();
+            for (int i = 0; i < total; i++) {
+                MediaImage img = images.get(i);
+                PlanFolder pf = map.get(names[i]);
+                if (pf == null) {
+                    pf = new PlanFolder(names[i]);
+                    map.put(names[i], pf);
+                }
+                pf.images.add(img);
+                pf.currentBytes += img.size;
+            }
+            cache.flush();      // persist newly resolved places so the next Preview reuses them
+            coordCache.flush(); // and the per-image GPS so we skip EXIF reads next time
 
             final List<PlanFolder> list = new ArrayList<>(map.values());
             estimate(list);
@@ -283,6 +312,7 @@ public class PreviewActivity extends Activity {
         super.onDestroy();
         cancelled = true;
         executor.shutdownNow();
+        if (geoPool != null) geoPool.shutdownNow();
         if (thumbLoader != null) thumbLoader.shutdown();
     }
 }

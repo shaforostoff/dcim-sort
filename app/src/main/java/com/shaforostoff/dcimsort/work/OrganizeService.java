@@ -16,6 +16,7 @@ import android.os.Looper;
 import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
+import com.shaforostoff.dcimsort.geo.CoordCache;
 import com.shaforostoff.dcimsort.geo.GeoCache;
 import com.shaforostoff.dcimsort.geo.GeoExtractor;
 import com.shaforostoff.dcimsort.geo.PlaceResolver;
@@ -105,10 +106,12 @@ public class OrganizeService extends Service {
 
         MediaRepository repo = new MediaRepository(this);
         GeoCache cache = new GeoCache(this);
+        CoordCache coordCache = new CoordCache(this);
         GeoExtractor geo = new GeoExtractor(repo);
         PlaceResolver places = new PlaceResolver(this, cache);
         TargetResolver targets = new TargetResolver(geo, places,
-                req.groupMode != null ? req.groupMode : com.shaforostoff.dcimsort.data.GroupMode.PLACE_MONTH);
+                req.groupMode != null ? req.groupMode : com.shaforostoff.dcimsort.data.GroupMode.PLACE_MONTH,
+                coordCache);
         OrganizeJournal journal = new OrganizeJournal(this);
         journal.reconcile(resolver);
         Mover mover = new Mover(this, journal);
@@ -184,6 +187,7 @@ public class OrganizeService extends Service {
                     if (sinceFlush.incrementAndGet() >= 25) {
                         sinceFlush.set(0);
                         cache.flush();
+                        coordCache.flush();
                     }
                 }
             }));
@@ -202,6 +206,7 @@ public class OrganizeService extends Service {
             Thread.currentThread().interrupt();
         }
         cache.flush();
+        coordCache.flush();
 
         boolean stopped = stop.get();
         main.post(() -> {

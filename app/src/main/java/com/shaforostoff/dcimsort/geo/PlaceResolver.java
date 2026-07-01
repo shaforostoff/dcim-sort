@@ -8,6 +8,7 @@ import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -20,6 +21,8 @@ public class PlaceResolver {
     private final GeoCache cache;
     private final Geocoder geocoder;        // null if not present on device
     private final NominatimClient online;
+    // Per-cell locks so concurrent callers for the same uncached cell do one lookup, not N.
+    private final ConcurrentHashMap<String, Object> inFlight = new ConcurrentHashMap<>();
 
     public PlaceResolver(Context ctx, GeoCache cache) {
         this.cache = cache;
@@ -41,9 +44,18 @@ public class PlaceResolver {
         if (cache.contains(key)) {
             return cache.get(key);
         }
-        String place = lookup(lat, lon);
-        cache.put(key, place); // caches empty for "not found"
-        return place;
+        // Serialize lookups for the same cell so parallel callers (Preview/Organize pools) collapse
+        // to a single geocoder/network request; the first writes the cache, the rest read it.
+        Object lock = inFlight.computeIfAbsent(key, k -> new Object());
+        synchronized (lock) {
+            if (cache.contains(key)) {
+                return cache.get(key);
+            }
+            String place = lookup(lat, lon);
+            cache.put(key, place); // caches empty for "not found"
+            inFlight.remove(key);
+            return place;
+        }
     }
 
     private String lookup(double lat, double lon) {
