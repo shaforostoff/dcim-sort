@@ -22,28 +22,33 @@ set(THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 set(BUILD_TESTING "OFF" CACHE STRING "" FORCE)
 
+# Set OFF to skip libavif + aom (faster build, smaller .so); set ON to re-enable native AVIF encoding.
+option(ENABLE_AVIF "Build and link libavif + aom AVIF encoder" OFF)
+
 # --- libavif (+ aom encoder) -----------------------------------------------------------------
 # Encode-only, aom codec only. AVIF_CODEC_AOM=LOCAL lets libavif build aom from source (via its
 # own FetchContent at configure time) so we don't vendor aom separately. We disable the decoder,
 # tests, examples and apps to keep the binary small.
-set(AVIF_CODEC_AOM "LOCAL" CACHE STRING "" FORCE)       # build aom from source via FetchContent
-set(AVIF_CODEC_AOM_ENCODE ON CACHE BOOL "" FORCE)
-set(AVIF_CODEC_AOM_DECODE OFF CACHE BOOL "" FORCE)      # encoder only — we never decode AVIF natively
-set(AVIF_LIBYUV "OFF" CACHE STRING "" FORCE)            # skip libyuv (extra dep; libavif falls back)
-set(AVIF_LIBSHARPYUV "OFF" CACHE STRING "" FORCE)       # skip libwebp/sharpyuv fetch
-set(AVIF_BUILD_APPS OFF CACHE BOOL "" FORCE)
-set(AVIF_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(AVIF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(AVIF_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-# aom: drop the decoder and everything non-essential for encode-only.
-set(CONFIG_AV1_DECODER 0 CACHE STRING "" FORCE)
-set(CONFIG_AV1_ENCODER 1 CACHE STRING "" FORCE)
-set(ENABLE_TESTS 0 CACHE BOOL "" FORCE)
-set(ENABLE_TOOLS 0 CACHE BOOL "" FORCE)
-set(ENABLE_EXAMPLES 0 CACHE BOOL "" FORCE)
-set(ENABLE_DOCS 0 CACHE BOOL "" FORCE)
-add_subdirectory(${THIRD_PARTY}/libavif libavif EXCLUDE_FROM_ALL)
+if(ENABLE_AVIF)
+    set(AVIF_CODEC_AOM "LOCAL" CACHE STRING "" FORCE)       # build aom from source via FetchContent
+    set(AVIF_CODEC_AOM_ENCODE ON CACHE BOOL "" FORCE)
+    set(AVIF_CODEC_AOM_DECODE OFF CACHE BOOL "" FORCE)      # encoder only — we never decode AVIF natively
+    set(AVIF_LIBYUV "OFF" CACHE STRING "" FORCE)            # skip libyuv (extra dep; libavif falls back)
+    set(AVIF_LIBSHARPYUV "OFF" CACHE STRING "" FORCE)       # skip libwebp/sharpyuv fetch
+    set(AVIF_BUILD_APPS OFF CACHE BOOL "" FORCE)
+    set(AVIF_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(AVIF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(AVIF_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    # aom: drop the decoder and everything non-essential for encode-only.
+    set(CONFIG_AV1_DECODER 0 CACHE STRING "" FORCE)
+    set(CONFIG_AV1_ENCODER 1 CACHE STRING "" FORCE)
+    set(ENABLE_TESTS 0 CACHE BOOL "" FORCE)
+    set(ENABLE_TOOLS 0 CACHE BOOL "" FORCE)
+    set(ENABLE_EXAMPLES 0 CACHE BOOL "" FORCE)
+    set(ENABLE_DOCS 0 CACHE BOOL "" FORCE)
+    add_subdirectory(${THIRD_PARTY}/libavif libavif EXCLUDE_FROM_ALL)
+endif()
 
 # --- jpegli (standalone github.com/google/jpegli; moved out of libjxl) -----------------------
 # We only need the `jpegli-static` target, which links highway + threads and exposes the
@@ -86,15 +91,16 @@ add_subdirectory(${THIRD_PARTY}/jpegli jpegli EXCLUDE_FROM_ALL)
 # --- our JNI bridge --------------------------------------------------------------------------
 add_library(dcimsort_codecs SHARED native-codecs.cpp)
 
-# avif/* headers; jpegli's headers (lib/jpegli/encode.h + generated <jpeglib.h>) propagate from
-# the jpegli-static target's PUBLIC include dirs, but add the repo root too for robustness.
+target_compile_definitions(dcimsort_codecs PRIVATE
+    $<$<BOOL:${ENABLE_AVIF}>:ENABLE_AVIF>)
+
+# avif/avif.h is only needed when ENABLE_AVIF; jpegli headers propagate via jpegli-static.
 target_include_directories(dcimsort_codecs PRIVATE
-    ${THIRD_PARTY}/libavif/include
+    $<$<BOOL:${ENABLE_AVIF}>:${THIRD_PARTY}/libavif/include>
     ${THIRD_PARTY}/jpegli)
 
-# `avif` and `jpegli-static` are the static targets exported by the two projects above.
 target_link_libraries(dcimsort_codecs
-    avif
+    $<$<BOOL:${ENABLE_AVIF}>:avif>
     jpegli-static
     jnigraphics
     log)

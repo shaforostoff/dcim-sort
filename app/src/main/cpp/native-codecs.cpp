@@ -1,5 +1,5 @@
-// JNI bridge for the `full` flavor: encodes an Android Bitmap to AVIF (libavif + aom, with optional
-// UltraHDR gain map and EXIF) or to JPEG (jpegli). Mirrors the Java methods declared in
+// JNI bridge for the `full` flavor: encodes an Android Bitmap to JPEG (jpegli) and optionally to
+// AVIF (libavif + aom) when built with -DENABLE_AVIF=ON. Mirrors the Java methods declared in
 // app/src/full/java/com/shaforostoff/dcimsort/codec/NativeCodecs.java.
 //
 // All entry points are best-effort: any failure returns JNI_FALSE and the Java side falls back or
@@ -15,7 +15,9 @@
 #include <cstring>
 #include <vector>
 
+#ifdef ENABLE_AVIF
 #include "avif/avif.h"
+#endif
 
 // jpegli's libjpeg-compatible API (github.com/google/jpegli). encode.h pulls in the generated
 // <jpeglib.h> types (jpeg_compress_struct, j_compress_ptr, JSAMPROW, ...).
@@ -55,6 +57,8 @@ bool writeFile(const char *path, const uint8_t *data, size_t size) {
     std::fclose(f);
     return wrote == size;
 }
+
+#ifdef ENABLE_AVIF
 
 // Reads a float[3] field (R,G,B) from a GainmapMeta instance into out[3].
 void readFloat3(JNIEnv *env, jobject meta, jclass cls, const char *field, float out[3]) {
@@ -144,8 +148,11 @@ void applyGainMapMeta(JNIEnv *env, avifGainMap *gainMap, jobject meta) {
     gainMap->alternateHdrHeadroom.d = denom;
 }
 
+#endif // ENABLE_AVIF
+
 } // namespace
 
+#ifdef ENABLE_AVIF
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeAvif(
         JNIEnv *env, jclass, jobject base, jobject gainmapContents, jobject meta,
@@ -212,6 +219,18 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeAvif(
     avifRWDataFree(&output);
     avifImageDestroy(image); // also frees attached gainMap + its image
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+#endif // ENABLE_AVIF
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeAvifAvailable(
+        JNIEnv *, jclass) {
+#ifdef ENABLE_AVIF
+    return JNI_TRUE;
+#else
+    return JNI_FALSE;
+#endif
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

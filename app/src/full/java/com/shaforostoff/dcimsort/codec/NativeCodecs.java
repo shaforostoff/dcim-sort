@@ -6,12 +6,11 @@ import android.util.Log;
 import java.io.File;
 
 /**
- * Full-flavor implementation backed by {@code libdcimsort_codecs.so} (libavif + aom, jpegli).
+ * Full-flavor implementation backed by {@code libdcimsort_codecs.so} (jpegli, and optionally
+ * libavif + aom when built with {@code -DENABLE_AVIF=ON}).
  *
- * <p>Both encoders accept an ARGB_8888 {@link Bitmap}; AVIF additionally accepts an optional gain
- * map (contents bitmap + {@link GainmapMeta}) so UltraHDR sources keep their HDR, and an optional
- * EXIF TIFF block that libavif embeds directly. JPEG EXIF is written by the caller afterward via
- * {@code ExifInterface}.
+ * <p>JPEG accepts an ARGB_8888 {@link Bitmap}; AVIF additionally accepts an optional gain map
+ * (contents bitmap + {@link GainmapMeta}) and an EXIF TIFF block that libavif embeds directly.
  */
 public final class NativeCodecs {
     private static final String TAG = "NativeCodecs";
@@ -36,7 +35,7 @@ public final class NativeCodecs {
     }
 
     public static boolean avifAvailable() {
-        return LOADED;
+        return LOADED && nativeAvifAvailable();
     }
 
     public static boolean jpegliAvailable() {
@@ -72,6 +71,8 @@ public final class NativeCodecs {
             return false;
         }
     }
+
+    private static native boolean nativeAvifAvailable();
 
     private static native boolean nativeEncodeAvif(Bitmap base, Bitmap gainmapContents,
                                                    GainmapMeta meta, int quality, byte[] exifTiff,
