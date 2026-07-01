@@ -23,23 +23,25 @@
                 android:layout_height="wrap_content"
                 android:text="@string/browse" />
 
+            <TextView
+                android:id="@+id/txt_folder"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp"
+                android:ellipsize="middle"
+                android:gravity="center_vertical|start"
+                android:singleLine="true"
+                android:text="@string/no_folder_selected"
+                android:textColor="#777777" />
+
             <Button
                 android:id="@+id/btn_files"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
                 android:text="@string/pick_files" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/txt_folder"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:ellipsize="middle"
-            android:singleLine="true"
-            android:text="@string/no_folder_selected"
-            android:textColor="#777777" />
 
         <!-- Recompression -->
         <TextView
