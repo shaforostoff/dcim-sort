@@ -29,6 +29,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -144,13 +145,22 @@ public class Recompressor {
     }
 
     public File compressToTemp(Uri source, CompressMode mode, int quality, int maxLongSide) {
+        return compressToTemp(source, mode, quality, maxLongSide, true);
+    }
+
+    /**
+     * @param embedExif when false, all EXIF/metadata handling is skipped — used by size estimation,
+     *                  which only needs the encoded byte count and not a faithful output file.
+     */
+    private File compressToTemp(Uri source, CompressMode mode, int quality, int maxLongSide,
+                                boolean embedExif) {
         // Full flavor: AVIF goes through libavif (HDR-preserving, EXIF embedded during encode).
         if (mode == CompressMode.AVIF && NativeCodecs.avifAvailable()) {
-            return compressAvifNative(source, quality, maxLongSide);
+            return compressAvifNative(source, quality, maxLongSide, embedExif);
         }
         // Full flavor: JPEG goes through jpegli; UltraHDR gain map is preserved when present.
         if (mode == CompressMode.JPEG && NativeCodecs.jpegliAvailable()) {
-            return compressJpegNative(source, quality, maxLongSide);
+            return compressJpegNative(source, quality, maxLongSide, embedExif);
         }
         Bitmap bmp = decodeOriented(source, maxLongSide);
         if (bmp == null) return null;
@@ -162,7 +172,7 @@ public class Recompressor {
                 out.delete();
                 return null;
             }
-            reinjectExif(source, out, mode);
+            if (embedExif) reinjectExif(source, out, mode);
             return out;
         } catch (IOException e) {
             if (out != null) out.delete();
@@ -177,7 +187,7 @@ public class Recompressor {
      * hands the base bitmap, gain map and a raw EXIF/TIFF block to libavif, which embeds HDR and
      * metadata during encode — so no ISO-BMFF EXIF surgery is needed afterward.
      */
-    private File compressAvifNative(Uri source, int quality, int maxLongSide) {
+    private File compressAvifNative(Uri source, int quality, int maxLongSide, boolean embedExif) {
         Bitmap base = decodeOriented(source, maxLongSide);
         if (base == null) return null;
         Bitmap gainmapContents = null;
@@ -193,7 +203,7 @@ public class Recompressor {
         File out = null;
         try {
             out = File.createTempFile("cmp_", ".avif", ctx.getCacheDir());
-            byte[] exifTiff = buildExifTiffBlock(readSourceExif(source));
+            byte[] exifTiff = embedExif ? buildExifTiffBlock(readSourceExif(source)) : null;
             boolean ok = NativeCodecs.encodeAvif(base, gainmapContents, meta, quality, exifTiff, out);
             if (!ok) {
                 out.delete();
@@ -214,7 +224,7 @@ public class Recompressor {
      * MPF offsets are not disturbed by post-encode ExifInterface writes. Falls back to plain JPEG
      * with normal EXIF re-injection when no gain map is present.
      */
-    private File compressJpegNative(Uri source, int quality, int maxLongSide) {
+    private File compressJpegNative(Uri source, int quality, int maxLongSide, boolean embedExif) {
         Bitmap base = decodeOriented(source, maxLongSide);
         if (base == null) return null;
         File out = null;
@@ -227,7 +237,7 @@ public class Recompressor {
                     Bitmap gainmapContents = g.getGainmapContents();
                     if (gainmapContents != null) {
                         GainmapMeta meta = toGainmapMeta(g);
-                        byte[] exifTiff = buildExifTiffBlock(readSourceExif(source));
+                        byte[] exifTiff = embedExif ? buildExifTiffBlock(readSourceExif(source)) : null;
                         boolean ok = NativeCodecs.encodeJpegR(base, gainmapContents, meta,
                                 quality, exifTiff, out);
                         if (ok) return out;
@@ -241,7 +251,7 @@ public class Recompressor {
                 out.delete();
                 return null;
             }
-            reinjectExif(source, out, CompressMode.JPEG);
+            if (embedExif) reinjectExif(source, out, CompressMode.JPEG);
             return out;
         } catch (IOException e) {
             if (out != null) out.delete();
@@ -278,12 +288,36 @@ public class Recompressor {
         return encodedSize(source, mode, quality, MAX_LONG_SIDE);
     }
 
+    /**
+     * Size in bytes the image would occupy after compression, for size estimation only. Skips all
+     * EXIF/metadata work (the count doesn't need it), and for WEBP encodes straight to a counting
+     * sink so no temp file touches disk. Other formats route through native/MediaCodec encoders that
+     * require a file path, so they still write (and immediately delete) a temp file.
+     */
     public long encodedSize(Uri source, CompressMode mode, int quality, int maxLongSide) {
-        File f = compressToTemp(source, mode, quality, maxLongSide);
+        if (mode == CompressMode.WEBP) {
+            Bitmap bmp = decodeOriented(source, maxLongSide);
+            if (bmp == null) return -1;
+            try {
+                CountingOutputStream cos = new CountingOutputStream();
+                return encodeWebp(bmp, quality, cos) ? cos.count() : -1;
+            } finally {
+                bmp.recycle();
+            }
+        }
+        File f = compressToTemp(source, mode, quality, maxLongSide, false);
         if (f == null) return -1;
         long len = f.length();
         f.delete();
         return len;
+    }
+
+    /** Discards everything written and just tallies the byte count — for size-only encoding. */
+    private static final class CountingOutputStream extends OutputStream {
+        private long count;
+        long count() { return count; }
+        @Override public void write(int b) { count++; }
+        @Override public void write(byte[] b, int off, int len) { count += len; }
     }
 
     // ---- Decoding -----------------------------------------------------------
@@ -374,9 +408,7 @@ public class Recompressor {
     private boolean encodeBitmap(Bitmap bmp, CompressMode mode, int quality, File out) {
         if (mode == CompressMode.WEBP) {
             try (FileOutputStream fos = new FileOutputStream(out)) {
-                Bitmap.CompressFormat fmt = Sdk.atLeastR()
-                        ? Bitmap.CompressFormat.WEBP_LOSSY : Bitmap.CompressFormat.WEBP;
-                return bmp.compress(fmt, quality, fos);
+                return encodeWebp(bmp, quality, fos);
             } catch (IOException e) {
                 return false;
             }
@@ -390,6 +422,13 @@ public class Recompressor {
             return NativeCodecs.encodeJpeg(bmp, quality, out);
         }
         return false;
+    }
+
+    /** WEBP encode to any sink — used for both temp-file output and size-only counting. */
+    private boolean encodeWebp(Bitmap bmp, int quality, OutputStream os) {
+        Bitmap.CompressFormat fmt = Sdk.atLeastR()
+                ? Bitmap.CompressFormat.WEBP_LOSSY : Bitmap.CompressFormat.WEBP;
+        return bmp.compress(fmt, quality, os);
     }
 
     private boolean encodeHeic(Bitmap src, int quality, File out) {
