@@ -172,6 +172,7 @@ public class PreviewActivity extends Activity {
         d.image = img;
         d.mode = mode;
         d.quality = quality;
+        d.skipFav = skipFav;
         ViewerData.set(d);
         startActivity(new Intent(this, ViewerActivity.class));
     }

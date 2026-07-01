@@ -36,6 +36,7 @@ public class ViewerActivity extends Activity {
     private MediaImage image;
     private CompressMode mode;
     private int quality;
+    private boolean skipFav;
 
     private Bitmap originalBitmap;
     private Bitmap compressedBitmap;
@@ -59,18 +60,23 @@ public class ViewerActivity extends Activity {
         image = data.image;
         mode = data.mode != null ? data.mode : CompressMode.NONE;
         quality = data.quality;
+        skipFav = data.skipFav;
 
         applyBottomInsets();
         loadOriginal();
 
         if (mode.recompresses()) {
             hint.setVisibility(View.VISIBLE);
-            imageView.setCompareEnabled(true);
-            imageView.setCompareListener(new ZoomableImageView.CompareListener() {
-                @Override public void onCompareStart() { startCompare(); }
-                @Override public void onCompareEnd() { endCompare(); }
-            });
-            // Compression is deferred until the user actually holds (see startCompare).
+            if (skipFav && image.favorite) {
+                hint.setText(R.string.favorite_no_compress);
+            } else {
+                imageView.setCompareEnabled(true);
+                imageView.setCompareListener(new ZoomableImageView.CompareListener() {
+                    @Override public void onCompareStart() { startCompare(); }
+                    @Override public void onCompareEnd() { endCompare(); }
+                });
+                // Compression is deferred until the user actually holds (see startCompare).
+            }
         }
     }
 

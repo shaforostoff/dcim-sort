@@ -8,6 +8,7 @@ public class ViewerData {
     public MediaImage image;
     public CompressMode mode;
     public int quality;
+    public boolean skipFav;
 
     private static volatile ViewerData pending;
 
