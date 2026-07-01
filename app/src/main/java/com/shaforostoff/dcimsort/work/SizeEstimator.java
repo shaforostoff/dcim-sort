@@ -16,6 +16,7 @@ public final class SizeEstimator {
     /** Coarse fallbacks (bytes per megapixel) used when on-device calibration is unavailable. */
     public static final double WEBP_BYTES_PER_MP = 0.22 * 1024 * 1024;
     public static final double HEIC_BYTES_PER_MP = 0.12 * 1024 * 1024;
+    public static final double AVIF_BYTES_PER_MP = 0.10 * 1024 * 1024;
 
     private static final int SAMPLE_COUNT = 6;
 
@@ -81,6 +82,10 @@ public final class SizeEstimator {
     }
 
     public static double defaultRatio(CompressMode mode) {
-        return mode == CompressMode.HEIC ? HEIC_BYTES_PER_MP : WEBP_BYTES_PER_MP;
+        switch (mode) {
+            case HEIC: return HEIC_BYTES_PER_MP;
+            case AVIF: return AVIF_BYTES_PER_MP;
+            default: return WEBP_BYTES_PER_MP;
+        }
     }
 }

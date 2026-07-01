@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.util.Size;
 
 import androidx.exifinterface.media.ExifInterface;
+import androidx.heifwriter.AvifWriter;
 import androidx.heifwriter.HeifWriter;
 
 import com.shaforostoff.dcimsort.data.CompressMode;
@@ -25,15 +26,17 @@ import java.io.InputStream;
 /**
  * Decodes, re-encodes (WebP/HEIC) and re-injects metadata. The output is written to a temp file in
  * the cache dir; callers publish it (MediaStore insert or legacy file write). Honest limitations:
- * ICC/wide-gamut profiles are lost (pixels normalize to sRGB) and HEIC cannot carry re-injected
- * EXIF via ExifInterface (read-only for HEIF), so only WebP gets full EXIF/GPS re-injection.
+ * ICC/wide-gamut profiles are lost (pixels normalize to sRGB) and HEIC/AVIF cannot carry re-injected
+ * EXIF via ExifInterface (read-only for HEIF/AVIF), so only WebP gets full EXIF/GPS re-injection.
  */
 public class Recompressor {
     /** Cap on the longest side so huge sensors don't OOM and stay within HEVC encoder limits. */
     private static final int MAX_LONG_SIDE = 4096;
-    private static final long HEIC_TIMEOUT_US = 12_000_000L;
+    /** Stop timeout for the HEVC/AV1 image writers. */
+    private static final long ENCODE_TIMEOUT_US = 12_000_000L;
 
     private static Boolean heicEncoderCached;
+    private static Boolean avifEncoderCached;
 
     private final Context ctx;
     private final MediaRepository repo;
@@ -44,11 +47,19 @@ public class Recompressor {
     }
 
     public static String extensionFor(CompressMode mode) {
-        return mode == CompressMode.HEIC ? ".heic" : ".webp";
+        switch (mode) {
+            case HEIC: return ".heic";
+            case AVIF: return ".avif";
+            default: return ".webp";
+        }
     }
 
     public static String mimeFor(CompressMode mode) {
-        return mode == CompressMode.HEIC ? "image/heic" : "image/webp";
+        switch (mode) {
+            case HEIC: return "image/heic";
+            case AVIF: return "image/avif";
+            default: return "image/webp";
+        }
     }
 
     /** True if this device can encode HEIC (API 28+ and an HEVC encoder is present). */
@@ -73,6 +84,31 @@ public class Recompressor {
             }
         }
         heicEncoderCached = ok;
+        return ok;
+    }
+
+    /** True if this device can encode AVIF (Android 16+ and an AV1 encoder is present). */
+    public static synchronized boolean hasAvifEncoder() {
+        if (avifEncoderCached != null) return avifEncoderCached;
+        boolean ok = false;
+        if (Sdk.atLeastBaklava()) {
+            try {
+                MediaCodecList list = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+                for (MediaCodecInfo info : list.getCodecInfos()) {
+                    if (!info.isEncoder()) continue;
+                    for (String t : info.getSupportedTypes()) {
+                        if (MediaFormat.MIMETYPE_VIDEO_AV1.equalsIgnoreCase(t)) {
+                            ok = true;
+                            break;
+                        }
+                    }
+                    if (ok) break;
+                }
+            } catch (Throwable ignore) {
+                ok = false;
+            }
+        }
+        avifEncoderCached = ok;
         return ok;
     }
 
@@ -206,6 +242,8 @@ public class Recompressor {
             }
         } else if (mode == CompressMode.HEIC) {
             return encodeHeic(bmp, quality, out);
+        } else if (mode == CompressMode.AVIF) {
+            return encodeAvif(bmp, quality, out);
         }
         return false;
     }
@@ -228,7 +266,37 @@ public class Recompressor {
                     .build();
             writer.start();
             writer.addBitmap(bmp);
-            writer.stop(HEIC_TIMEOUT_US);
+            writer.stop(ENCODE_TIMEOUT_US);
+            return out.length() > 0;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (writer != null) {
+                try { writer.close(); } catch (Exception ignore) {}
+            }
+            if (bmp != src) bmp.recycle();
+        }
+    }
+
+    private boolean encodeAvif(Bitmap src, int quality, File out) {
+        if (!Sdk.atLeastBaklava()) return false;
+        // AV1 encoders require even dimensions.
+        Bitmap bmp = src;
+        int w = src.getWidth() & ~1;
+        int h = src.getHeight() & ~1;
+        if (w != src.getWidth() || h != src.getHeight()) {
+            bmp = Bitmap.createBitmap(src, 0, 0, Math.max(2, w), Math.max(2, h));
+        }
+        AvifWriter writer = null;
+        try {
+            writer = new AvifWriter.Builder(
+                    out.getAbsolutePath(), bmp.getWidth(), bmp.getHeight(), AvifWriter.INPUT_MODE_BITMAP)
+                    .setQuality(quality)
+                    .setMaxImages(1)
+                    .build();
+            writer.start();
+            writer.addBitmap(bmp);
+            writer.stop(ENCODE_TIMEOUT_US);
             return out.length() > 0;
         } catch (Exception e) {
             return false;

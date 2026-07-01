@@ -65,7 +65,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // Views
     private TextView txtFolder, txtQuality, txtProgress, txtPlan;
     private RadioGroup radioMode;
-    private RadioButton radioNone, radioWebp, radioHeic;
+    private RadioButton radioNone, radioWebp, radioHeic, radioAvif;
     private RadioGroup radioGroupMode;
     private RadioButton radioGroupNone, radioGroupPlaceMonth, radioGroupPlaceDay;
     private LinearLayout qualityGroup, progressGroup, dateRangeGroup;
@@ -139,6 +139,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         radioNone = findViewById(R.id.radio_compressnone);
         radioWebp = findViewById(R.id.radio_compresswebp);
         radioHeic = findViewById(R.id.radio_compressheic);
+        radioAvif = findViewById(R.id.radio_compressavif);
         qualityGroup = findViewById(R.id.quality_group);
         txtQuality = findViewById(R.id.txt_quality);
         seekQuality = findViewById(R.id.seek_quality);
@@ -180,6 +181,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         // HEIC only when the device can encode it.
         if (!Recompressor.hasHeicEncoder()) {
             radioHeic.setVisibility(View.GONE);
+        }
+        // AVIF only on Android 16+ with an AV1 encoder.
+        if (!Recompressor.hasAvifEncoder()) {
+            radioAvif.setVisibility(View.GONE);
         }
         // Favorites skip only on Android 11+.
         if (!Sdk.atLeastR()) {
@@ -241,9 +246,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (mode == CompressMode.HEIC && !Recompressor.hasHeicEncoder()) {
             mode = CompressMode.NONE;
         }
+        if (mode == CompressMode.AVIF && !Recompressor.hasAvifEncoder()) {
+            mode = CompressMode.NONE;
+        }
         switch (mode) {
             case WEBP: radioWebp.setChecked(true); break;
             case HEIC: radioHeic.setChecked(true); break;
+            case AVIF: radioAvif.setChecked(true); break;
             default: radioNone.setChecked(true); break;
         }
         qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
@@ -272,6 +281,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         int id = radioMode.getCheckedRadioButtonId();
         if (id == R.id.radio_compresswebp) return CompressMode.WEBP;
         if (id == R.id.radio_compressheic) return CompressMode.HEIC;
+        if (id == R.id.radio_compressavif) return CompressMode.AVIF;
         return CompressMode.NONE;
     }
 

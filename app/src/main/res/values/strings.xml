@@ -22,6 +22,7 @@
     <string name="compressmode_none">No</string>
     <string name="compressmode_webp">WebP</string>
     <string name="compressmode_heic">HEIC</string>
+    <string name="compressmode_avif">AVIF</string>
     <string name="quality_label">Quality: %1$d</string>
     <string name="skip_favorites">Do not compress photos marked as favorite</string>
     <string name="keep_original">Keep original (copy instead of move)</string>

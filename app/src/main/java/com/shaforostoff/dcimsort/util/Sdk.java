@@ -35,4 +35,9 @@ public final class Sdk {
     public static boolean atLeastU() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
     }
+
+    /** Android 16 (API 36) — mandated AV1 image encoder; AVIF encoding available. */
+    public static boolean atLeastBaklava() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA;
+    }
 }

@@ -321,6 +321,7 @@ public class MediaRepository {
             case "image/png": return ".png";
             case "image/webp": return ".webp";
             case "image/heic": case "image/heif": return ".heic";
+            case "image/avif": return ".avif";
             case "image/gif": return ".gif";
             default: return ".jpg";
         }

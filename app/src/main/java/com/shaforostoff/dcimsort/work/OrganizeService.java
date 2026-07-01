@@ -117,7 +117,8 @@ public class OrganizeService extends Service {
         Mover mover = new Mover(this, journal);
         Recompressor rc = new Recompressor(this, repo);
 
-        boolean heavy = req.mode == com.shaforostoff.dcimsort.data.CompressMode.HEIC;
+        boolean heavy = req.mode == com.shaforostoff.dcimsort.data.CompressMode.HEIC
+                || req.mode == com.shaforostoff.dcimsort.data.CompressMode.AVIF;
         int workers = ThreadPlanner.workerCount(this, heavy);
 
         ThreadPoolExecutor pool = new ThreadPoolExecutor(

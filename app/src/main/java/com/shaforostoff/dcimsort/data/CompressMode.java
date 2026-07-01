@@ -4,7 +4,8 @@ package com.shaforostoff.dcimsort.data;
 public enum CompressMode {
     NONE,
     WEBP,
-    HEIC;
+    HEIC,
+    AVIF;
 
     public boolean recompresses() {
         return this != NONE;
