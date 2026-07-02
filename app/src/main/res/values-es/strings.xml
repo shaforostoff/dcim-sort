@@ -26,7 +26,7 @@
     <string name="compressmode_jpeg">JPEG-li</string>
     <string name="quality_label">Calidad: %1$d</string>
     <string name="skip_favorites">No comprimir fotos marcadas como favoritas</string>
-    <string name="skip_low_gain">Omitir compresión si el nuevo tamaño &gt;50%</string>
+    <string name="skip_low_gain">Omitir compresión de archivos ya pequeños</string>
     <string name="keep_original">Conservar original (copiar en lugar de mover)</string>
     <string name="keep_original_forced">Algunas fotos seleccionadas no están en este dispositivo: se conservarán los originales</string>
 

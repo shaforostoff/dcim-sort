@@ -26,7 +26,7 @@
     <string name="compressmode_jpeg">JPEG-li</string>
     <string name="quality_label">Качество: %1$d</string>
     <string name="skip_favorites">Не сжимать фото, отмеченные как избранные</string>
-    <string name="skip_low_gain">Не сжимать, если новый размер &gt;50%</string>
+    <string name="skip_low_gain">Не сжимать файлы, которые уже маленькие</string>
     <string name="keep_original">Сохранять оригинал (копировать, а не перемещать)</string>
     <string name="keep_original_forced">Некоторые выбранные фото недоступны на этом устройстве — оригиналы будут сохранены</string>
 
