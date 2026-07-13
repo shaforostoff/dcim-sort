@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">DCIM Sort</string>
+    <string name="app_name">DCIM Photo Sort</string>
 
     <!-- Screen titles -->
     <string name="title_pick_folder">Seleccionar carpeta</string>

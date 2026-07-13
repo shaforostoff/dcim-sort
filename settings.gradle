@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DCIM Sort"
+rootProject.name = "DCIM Photo Sort"
 include ':app'

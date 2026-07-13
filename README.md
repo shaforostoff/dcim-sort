@@ -1,4 +1,4 @@
-# DCIM Sort
+# DCIM Photo Sort
 
 ## Description
 
