@@ -26,8 +26,13 @@ public final class PermissionManager {
         if (Sdk.atLeastQ()) {
             // Needed so MediaStore returns un-redacted EXIF GPS via setRequireOriginal().
             p.add(Manifest.permission.ACCESS_MEDIA_LOCATION);
-        } else {
-            // Legacy: direct file writes for moving on <=28.
+        }
+        // Legacy write access. On <=28 it enables direct file moves. On Android 10 (API 29),
+        // combined with requestLegacyExternalStorage=true, it activates the full-access storage
+        // view so MediaStore update/delete on other apps' images succeed without per-file consent
+        // (createWriteRequest only exists on API 30+, handled separately in MainActivity). On
+        // API 30+ the permission is ignored and not grantable, so we don't request it there.
+        if (!Sdk.atLeastR()) {
             p.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }
         return p.toArray(new String[0]);

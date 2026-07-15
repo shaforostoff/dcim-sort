@@ -9,9 +9,12 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <!-- Writing/moving files directly is only needed on legacy (<=28) storage. -->
+    <!-- Legacy write access. Needed for direct file moves on <=28, and on Android 10 (API 29):
+         combined with requestLegacyExternalStorage=true it grants the full-access storage view so
+         MediaStore update/delete on other apps' images succeed without per-file consent (there is no
+         createWriteRequest before API 30). Ignored/unrequestable on API 30+. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
+        android:maxSdkVersion="29" />
     <!-- Required (29+) to read un-redacted EXIF GPS from MediaStore images. -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <!-- Online reverse-geocode fallback when Geocoder is unavailable. -->
