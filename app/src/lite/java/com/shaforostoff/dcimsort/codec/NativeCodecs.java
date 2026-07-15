@@ -40,4 +40,8 @@ public final class NativeCodecs {
                                       int quality, byte[] exifTiff, File out) {
         return false;
     }
+
+    /** No-op in lite: no native allocator to purge. Mirrors the full flavor's signature. */
+    public static void purgeMemory() {
+    }
 }

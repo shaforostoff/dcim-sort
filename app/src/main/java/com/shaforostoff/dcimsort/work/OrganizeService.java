@@ -14,6 +14,7 @@ import android.os.IBinder;
 import android.os.Looper;
 
 import com.shaforostoff.dcimsort.R;
+import com.shaforostoff.dcimsort.codec.NativeCodecs;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.geo.CoordCache;
@@ -230,6 +231,10 @@ public class OrganizeService extends Service {
         }
         cache.flush();
         coordCache.flush();
+
+        // The batch just freed a burst of large native encode buffers (jpegli/libavif). Nudge the
+        // native allocator to hand those pages back to the OS instead of caching them while idle.
+        NativeCodecs.purgeMemory();
 
         boolean stopped = stop.get();
         List<String> folders = new ArrayList<>(destFolders);

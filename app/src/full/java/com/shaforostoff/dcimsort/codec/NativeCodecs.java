@@ -92,6 +92,22 @@ public final class NativeCodecs {
         }
     }
 
+    /**
+     * Asks the native allocator to release cached free memory back to the OS. Call once after a
+     * compression batch finishes; it's a no-op on any harm and safe to call when unloaded. Does
+     * nothing for decoded {@link Bitmap}s (those live on the graphics heap, not the malloc heap).
+     */
+    public static void purgeMemory() {
+        if (!LOADED) return;
+        try {
+            nativePurgeMemory();
+        } catch (Throwable t) {
+            Log.w(TAG, "purgeMemory failed", t);
+        }
+    }
+
+    private static native void nativePurgeMemory();
+
     private static native boolean nativeAvifAvailable();
 
     private static native boolean nativeEncodeAvif(Bitmap base, Bitmap gainmapContents,

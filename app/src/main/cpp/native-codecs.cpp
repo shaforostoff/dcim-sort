@@ -8,6 +8,8 @@
 #include <jni.h>
 #include <android/bitmap.h>
 #include <android/log.h>
+#include <malloc.h>
+#include <dlfcn.h>
 
 #include <cmath>
 #include <cstdint>
@@ -438,6 +440,21 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeAvif(
 }
 
 #endif // ENABLE_AVIF
+
+// Forces bionic's allocator (Scudo on API 30+, jemalloc before) to return decayed/cached free
+// pages to the OS immediately, rather than waiting for its background decay. Meant to be called
+// once after a compression batch, when a burst of large encode buffers has just been freed.
+//
+// mallopt() is only exposed by the NDK headers (and only present in libc) from API 26 on, while
+// our minSdk is 24. Resolve it at runtime so we simply skip the purge on 24/25 devices instead of
+// failing to load. M_PURGE (-101) is a plain macro available at every API level.
+extern "C" JNIEXPORT void JNICALL
+Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativePurgeMemory(
+        JNIEnv *, jclass) {
+    using MalloptFn = int (*)(int, int);
+    static auto mallopt_fn = reinterpret_cast<MalloptFn>(dlsym(RTLD_DEFAULT, "mallopt"));
+    if (mallopt_fn) mallopt_fn(M_PURGE, 0);
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeAvifAvailable(
