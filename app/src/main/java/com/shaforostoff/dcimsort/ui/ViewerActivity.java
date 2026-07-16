@@ -10,7 +10,7 @@ import android.util.DisplayMetrics;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
-import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.TextView;
 
 import com.shaforostoff.dcimsort.R;
@@ -34,7 +34,7 @@ public class ViewerActivity extends Activity {
 
     private ZoomableImageView imageView;
     private TextView overlay, hint;
-    private Button btnExclude;
+    private CheckBox btnExclude;
 
     private List<MediaImage> images;
     private int currentIndex;
@@ -80,12 +80,9 @@ public class ViewerActivity extends Activity {
             });
         }
 
-        // Exclude / Include toggle button.
+        // Include checkbox.
         updateExcludeButton();
-        btnExclude.setOnClickListener(v -> {
-            SelectionStore.toggle(image.key());
-            updateExcludeButton();
-        });
+        btnExclude.setOnClickListener(v -> SelectionStore.toggle(image.key()));
 
         if (mode.recompresses()) {
             // Set listener once; it captures fields by reference so navigation updates it implicitly.
@@ -238,8 +235,7 @@ public class ViewerActivity extends Activity {
     }
 
     private void updateExcludeButton() {
-        btnExclude.setText(SelectionStore.isSelected(image.key())
-                ? R.string.exclude : R.string.include);
+        btnExclude.setChecked(SelectionStore.isSelected(image.key()));
     }
 
     /** Lift the bottom hint/overlay/button above the system navigation bar (edge-to-edge on API 35+). */
@@ -250,7 +246,7 @@ public class ViewerActivity extends Activity {
             int bottom = bottomInset(insets);
             setBottomMargin(hint, base16 + bottom);
             setBottomMargin(overlay, bottom);
-            setBottomMargin(btnExclude, base16 + bottom);
+            setTopMargin(btnExclude, base16 + topInset(insets));
             return insets;
         });
         root.requestApplyInsets();
@@ -263,10 +259,25 @@ public class ViewerActivity extends Activity {
         return insets.getSystemWindowInsetBottom();
     }
 
+    private static int topInset(WindowInsets insets) {
+        if (Sdk.atLeastR()) {
+            return insets.getInsets(WindowInsets.Type.systemBars()).top;
+        }
+        return insets.getSystemWindowInsetTop();
+    }
+
     private static void setBottomMargin(View v, int margin) {
         ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) v.getLayoutParams();
         if (lp.bottomMargin != margin) {
             lp.bottomMargin = margin;
+            v.setLayoutParams(lp);
+        }
+    }
+
+    private static void setTopMargin(View v, int margin) {
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) v.getLayoutParams();
+        if (lp.topMargin != margin) {
+            lp.topMargin = margin;
             v.setLayoutParams(lp);
         }
     }
