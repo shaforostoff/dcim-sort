@@ -269,6 +269,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
         radioGroupMode.setOnCheckedChangeListener((group, checkedId) -> {
             settings.setGroupMode(currentGroupMode());
+            updateOrganizeButtonLabel();
         });
 
         btnDateFrom.setOnClickListener(v -> pickDate(true));
@@ -345,6 +346,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             case PLACE_DAY: radioGroupPlaceDay.setChecked(true); break;
             default: radioGroupPlaceMonth.setChecked(true); break;
         }
+        updateOrganizeButtonLabel();
+    }
+
+    /** Without folder grouping the run only recompresses, so label the action "Compress". */
+    private void updateOrganizeButtonLabel() {
+        btnOrganize.setText(currentGroupMode() == GroupMode.NONE
+                ? R.string.compress : R.string.organize);
     }
 
     private GroupMode currentGroupMode() {

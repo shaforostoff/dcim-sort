@@ -44,6 +44,7 @@
 
     <string name="preview">Preview</string>
     <string name="organize">Organize</string>
+    <string name="compress">Compress</string>
     <string name="stop">Stop</string>
 
     <!-- Permissions -->
