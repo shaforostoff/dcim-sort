@@ -18,6 +18,16 @@ set(CMAKE_CXX_STANDARD 17)
 add_compile_options(-O3 -ffast-math -ffunction-sections -fdata-sections -fvisibility=hidden)
 add_link_options(-Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,-s)
 
+# The codec stack (jpegli, libavif + aom) is only built for arm64-v8a. For any other ABI we emit a
+# tiny stub libdcimsort_codecs.so and stop here: it's never loaded at runtime (the full-flavor Java
+# only loads the library on 64-bit devices), but its presence makes Google Play treat 32-bit devices
+# as compatible so the app installs and falls back to the pure-Java (lite-equivalent) paths there.
+if(NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+    message(STATUS "dcimsort_codecs: ${CMAKE_ANDROID_ARCH_ABI} -> building stub (no native codecs)")
+    add_library(dcimsort_codecs SHARED native-codecs-stub.cpp)
+    return()
+endif()
+
 set(THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 set(BUILD_TESTING "OFF" CACHE STRING "" FORCE)

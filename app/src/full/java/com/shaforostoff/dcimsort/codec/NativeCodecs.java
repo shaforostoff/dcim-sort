@@ -1,6 +1,7 @@
 package com.shaforostoff.dcimsort.codec;
 
 import android.graphics.Bitmap;
+import android.os.Build;
 import android.util.Log;
 
 import java.io.File;
@@ -17,13 +18,18 @@ public final class NativeCodecs {
     private static final boolean LOADED;
 
     static {
-        boolean ok;
-        try {
-            System.loadLibrary("dcimsort_codecs");
-            ok = true;
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to load native codecs", t);
-            ok = false;
+        boolean ok = false;
+        // The real codecs are only built for arm64-v8a; 32-bit devices carry just a stub .so (present
+        // solely so Google Play lets them install). Skip loading on those devices and fall back to the
+        // pure-Java paths, mirroring the lite flavor. Guarding on the 64-bit ABI list avoids loading
+        // (and then calling into) the stub, which has none of the JNI symbols.
+        if (Build.SUPPORTED_64_BIT_ABIS.length > 0) {
+            try {
+                System.loadLibrary("dcimsort_codecs");
+                ok = true;
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to load native codecs", t);
+            }
         }
         LOADED = ok;
     }
