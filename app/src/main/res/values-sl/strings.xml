@@ -27,6 +27,8 @@
     <string name="quality_label">Kakovost: %1$d</string>
     <string name="skip_favorites">Ne stiskaj fotografij, označenih kot priljubljene</string>
     <string name="skip_low_gain">Preskoči stiskanje že majhnih datotek</string>
+    <string name="min_gain_title">Mejni prihranek pri stiskanju</string>
+    <string name="min_gain_label">Preskoči stiskanje, če je prihranek manjši od %1$d %%</string>
     <string name="keep_original">Ohrani izvirnik (kopiraj namesto premikanja)</string>
     <string name="keep_original_forced">Nekatere izbrane fotografije niso na tej napravi — izvirniki bodo ohranjeni</string>
 

@@ -27,6 +27,8 @@
     <string name="quality_label">Качество: %1$d</string>
     <string name="skip_favorites">Не сжимать фото, отмеченные как избранные</string>
     <string name="skip_low_gain">Не сжимать файлы, которые уже маленькие</string>
+    <string name="min_gain_title">Порог выигрыша сжатия</string>
+    <string name="min_gain_label">Не сжимать, если выигрыш меньше %1$d %%</string>
     <string name="keep_original">Сохранять оригинал (копировать, а не перемещать)</string>
     <string name="keep_original_forced">Некоторые выбранные фото недоступны на этом устройстве — оригиналы будут сохранены</string>
 

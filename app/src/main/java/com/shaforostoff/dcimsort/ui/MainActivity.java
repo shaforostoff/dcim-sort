@@ -114,6 +114,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private int pendingQuality;
     private boolean pendingSkipFav;
     private boolean pendingSkipLowGain;
+    private int pendingMinGain;
     private String pendingRel, pendingDir;
     private List<ConsentStep> consentQueue;
     private int consentIndex;
@@ -263,6 +264,12 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             recomputeSummary();
         });
 
+        // Long-press exposes the threshold behind the checkbox (how much must be saved to be worth it).
+        checkSkipLowGain.setOnLongClickListener(v -> {
+            showMinGainDialog();
+            return true;
+        });
+
         checkKeepOriginal.setOnCheckedChangeListener((b, checked) -> {
             if (!keepOriginalForced) userKeepOriginal = checked;
         });
@@ -282,6 +289,47 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
         setRangeControlsEnabled(false);
         updateDateLabels();
+    }
+
+    /**
+     * Overlay behind the skip-low-gain checkbox (long-press): picks the minimum saving, 1–99%, below
+     * which compressing isn't worth it. Applied on OK so dragging the bar doesn't re-run estimates.
+     */
+    private void showMinGainDialog() {
+        View content = getLayoutInflater().inflate(R.layout.dialog_min_gain, null);
+        TextView label = content.findViewById(R.id.txt_min_gain);
+        SeekBar seek = content.findViewById(R.id.seek_min_gain);
+        seek.setProgress(settings.getMinGainPercent() - SizeEstimator.MIN_GAIN_PERCENT_MIN);
+        label.setText(getString(R.string.min_gain_label, minGainOf(seek)));
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
+                label.setText(getString(R.string.min_gain_label, minGainOf(s)));
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.min_gain_title)
+                .setView(content)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    settings.setMinGainPercent(minGainOf(seek));
+                    updateSkipLowGainLabel();
+                    if (checkSkipLowGain.isChecked()) recomputeSummary();
+                })
+                .show();
+    }
+
+    /** The bar has no min below API 26, so it carries value − MIN_GAIN_PERCENT_MIN. */
+    private static int minGainOf(SeekBar seek) {
+        return seek.getProgress() + SizeEstimator.MIN_GAIN_PERCENT_MIN;
+    }
+
+    /** Shows the configured threshold on the checkbox, since the overlay that sets it is hidden. */
+    private void updateSkipLowGainLabel() {
+        checkSkipLowGain.setText(getString(R.string.skip_low_gain_with_percent,
+                getString(R.string.skip_low_gain), settings.getMinGainPercent()));
     }
 
     private void showInfoDialog() {
@@ -341,6 +389,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         txtQuality.setText(getString(R.string.quality_label, q));
         checkSkipFav.setChecked(settings.getSkipFavorites());
         checkSkipLowGain.setChecked(settings.getSkipLowGain());
+        updateSkipLowGainLabel();
         switch (settings.getGroupMode()) {
             case NONE: radioGroupNone.setChecked(true); break;
             case PLACE_DAY: radioGroupPlaceDay.setChecked(true); break;
@@ -638,6 +687,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         final int quality = seekQuality.getProgress();
         final boolean skipFav = checkSkipFav.isChecked() && Sdk.atLeastR();
         final boolean skipLowGain = checkSkipLowGain.isChecked();
+        final int minGain = settings.getMinGainPercent();
         final int gen = ++summaryGen;
 
         if (count == 0) {
@@ -672,7 +722,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 if (gen != summaryGen) return; // stale: don't cache a ratio for a superseded image set
                 ratioCache.put(cacheKey, ratio);
             }
-            long est = SizeEstimator.estimateWithRatio(inRange, ratio, mode, skipFav, skipLowGain);
+            long est = SizeEstimator.estimateWithRatio(
+                    inRange, ratio, mode, skipFav, skipLowGain, minGain);
             if (gen != summaryGen) return;
             lastEstimateRatio = ratio; // reused by Preview instead of re-encoding samples
             main.post(() -> {
@@ -709,6 +760,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         i.putExtra(Extras.QUALITY, seekQuality.getProgress());
         i.putExtra(Extras.SKIP_FAV, checkSkipFav.isChecked() && Sdk.atLeastR());
         i.putExtra(Extras.SKIP_LOW_GAIN, checkSkipLowGain.isChecked());
+        i.putExtra(Extras.MIN_GAIN_PERCENT, settings.getMinGainPercent());
         i.putExtra(Extras.DATE_FROM, rangeFrom);
         i.putExtra(Extras.DATE_TO, rangeTo);
     }
@@ -736,12 +788,12 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         setBusy(true);
         onImagesGathered(imgs, currentMode(), currentGroupMode(), seekQuality.getProgress(),
                 checkSkipFav.isChecked() && Sdk.atLeastR(), checkSkipLowGain.isChecked(),
-                relPath, dataDir);
+                settings.getMinGainPercent(), relPath, dataDir);
     }
 
     private void onImagesGathered(List<MediaImage> imgs, CompressMode mode, GroupMode groupMode,
                                   int quality, boolean skipFav, boolean skipLowGain,
-                                  String rel, String dir) {
+                                  int minGainPercent, String rel, String dir) {
         if (imgs.isEmpty()) {
             setBusy(false);
             toast(R.string.no_photos);
@@ -753,6 +805,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         pendingQuality = quality;
         pendingSkipFav = skipFav;
         pendingSkipLowGain = skipLowGain;
+        pendingMinGain = minGainPercent;
         pendingRel = rel;
         pendingDir = dir;
         pendingKeepOriginal = checkKeepOriginal.isChecked();
@@ -812,6 +865,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         req.quality = pendingQuality;
         req.skipFavorites = pendingSkipFav;
         req.skipLowGain = pendingSkipLowGain;
+        req.minGainPercent = pendingMinGain;
         req.keepOriginal = pendingKeepOriginal;
         req.sourceRelativePath = pendingRel;
         req.sourceDataDir = pendingDir;

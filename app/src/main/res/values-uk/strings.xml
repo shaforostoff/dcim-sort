@@ -27,6 +27,8 @@
     <string name="quality_label">Якість: %1$d</string>
     <string name="skip_favorites">Не стискати фото, позначені як улюблені</string>
     <string name="skip_low_gain">Не стискати файли, які вже малі</string>
+    <string name="min_gain_title">Поріг виграшу стиснення</string>
+    <string name="min_gain_label">Не стискати, якщо виграш менший за %1$d %%</string>
     <string name="keep_original">Зберігати оригінал (копіювати, а не переміщувати)</string>
     <string name="keep_original_forced">Деякі вибрані фото відсутні на цьому пристрої — оригінали буде збережено</string>
 

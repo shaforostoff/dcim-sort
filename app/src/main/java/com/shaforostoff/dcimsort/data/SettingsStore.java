@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import com.shaforostoff.dcimsort.data.GroupMode;
+import com.shaforostoff.dcimsort.work.SizeEstimator;
 
 /** Persists the selected source folder and compression settings across app restarts. */
 public class SettingsStore {
@@ -19,6 +20,7 @@ public class SettingsStore {
     private static final String K_QUALITY = "quality";
     private static final String K_SKIP_FAV = "skip_favorites";
     private static final String K_SKIP_LOW_GAIN = "skip_low_gain";
+    private static final String K_MIN_GAIN_PERCENT = "min_gain_percent";
     private static final String K_FOLDER_SORT_ALPHA = "folder_sort_alpha";
 
     private final SharedPreferences prefs;
@@ -87,6 +89,17 @@ public class SettingsStore {
 
     public void setSkipLowGain(boolean skip) {
         prefs.edit().putBoolean(K_SKIP_LOW_GAIN, skip).apply();
+    }
+
+    /** Minimum saving (percent of the original) that makes compressing worth it; kept even when
+     *  skip-low-gain is off, so toggling the checkbox doesn't lose the chosen threshold. */
+    public int getMinGainPercent() {
+        return SizeEstimator.clampMinGain(
+                prefs.getInt(K_MIN_GAIN_PERCENT, SizeEstimator.DEFAULT_MIN_GAIN_PERCENT));
+    }
+
+    public void setMinGainPercent(int percent) {
+        prefs.edit().putInt(K_MIN_GAIN_PERCENT, SizeEstimator.clampMinGain(percent)).apply();
     }
 
     public boolean isFolderSortAlpha() { return prefs.getBoolean(K_FOLDER_SORT_ALPHA, false); }

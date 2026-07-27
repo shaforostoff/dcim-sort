@@ -135,6 +135,7 @@ public class OrganizeService extends Service {
 
         final int total = req.images.size();
         final boolean skipLowGain = req.skipLowGain;
+        final double keepRatio = SizeEstimator.keepRatio(req.minGainPercent);
         final AtomicInteger done = new AtomicInteger();
         final AtomicInteger moved = new AtomicInteger();
         final AtomicInteger skipped = new AtomicInteger();
@@ -161,7 +162,7 @@ public class OrganizeService extends Service {
                         File temp = recompress
                                 ? rc.compressToTemp(img.readUri(), req.mode, req.quality) : null;
                         // skip-low-gain: too little saved → import the original untouched (temp=null).
-                        if (lowGain(skipLowGain, temp, img)) {
+                        if (lowGain(skipLowGain, keepRatio, temp, img)) {
                             temp.delete();
                             temp = null;
                         }
@@ -181,7 +182,7 @@ public class OrganizeService extends Service {
                         else failed.incrementAndGet();
                     } else {
                         File temp = rc.compressToTemp(img.readUri(), req.mode, req.quality);
-                        if (lowGain(skipLowGain, temp, img)) {
+                        if (lowGain(skipLowGain, keepRatio, temp, img)) {
                             // Too little saved → leave the photo uncompressed and just move it.
                             temp.delete();
                             Mover.Outcome o = mover.move(img, srcRel, folder);
@@ -253,11 +254,12 @@ public class OrganizeService extends Service {
 
     /**
      * Skip-low-gain test: true when the compressed {@code temp} saved too little (its size exceeds
-     * {@link SizeEstimator#SKIP_LOW_GAIN_RATIO} of the original), so the original should be kept.
+     * {@code keepRatio} of the original, see {@link SizeEstimator#keepRatio(int)}), so the original
+     * should be kept.
      */
-    private static boolean lowGain(boolean skipLowGain, File temp, MediaImage img) {
+    private static boolean lowGain(boolean skipLowGain, double keepRatio, File temp, MediaImage img) {
         return skipLowGain && temp != null && img.size > 0
-                && temp.length() > img.size * SizeEstimator.SKIP_LOW_GAIN_RATIO;
+                && temp.length() > img.size * keepRatio;
     }
 
     private void publish(int done, int total, String folder,

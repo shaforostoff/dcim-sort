@@ -27,6 +27,8 @@
     <string name="quality_label">Qualität: %1$d</string>
     <string name="skip_favorites">Als Favorit markierte Fotos nicht komprimieren</string>
     <string name="skip_low_gain">Komprimierung bereits kleiner Dateien überspringen</string>
+    <string name="min_gain_title">Schwelle für Komprimierungsgewinn</string>
+    <string name="min_gain_label">Komprimierung überspringen, wenn der Gewinn unter %1$d %% liegt</string>
     <string name="keep_original">Original beibehalten (kopieren statt verschieben)</string>
     <string name="keep_original_forced">Einige ausgewählte Fotos befinden sich nicht auf diesem Gerät — Originale werden beibehalten</string>
 
