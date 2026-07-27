@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Themed-icon (monochrome) layer: a flat silhouette of the photo stack. The launcher tints the whole
+  layer with the user's theme colour and uses only its shape, so the colour below is a placeholder —
+  which is why the full-colour launcher bitmap can't serve as this layer (it would tint to a blob).
+  Art stays within the 66dp safe zone of the 108dp layer, so no launcher mask clips it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Sliver of the card sitting behind the front one (top + left band). -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M28,64 L28,39 Q28,35 32,35 L68,35 Q72,35 72,39 L32,39 L32,64 Z" />
+
+    <!-- Front card frame. -->
+    <path
+        android:pathData="M41,43 L75,43 Q80,43 80,48 L80,68 Q80,73 75,73 L41,73 Q36,73 36,68 L36,48 Q36,43 41,43 Z"
+        android:strokeColor="#000000"
+        android:strokeWidth="4" />
+
+    <!-- Mountains. -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M41.5,69 L52,52.5 L59.5,62 L65,56 L75.5,69 Z" />
+
+    <!-- Sun. -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M65.5,51 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z" />
+</vector>
