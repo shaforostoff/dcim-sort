@@ -171,11 +171,14 @@ public class ViewerActivity extends Activity {
         final Recompressor rc = new Recompressor(this, repo);
         final MediaImage target = image;
         final int gen = generation;
+        final int maxDim = screenMaxDim();
         executor.execute(() -> {
             File temp = rc.compressToTemp(target.readUri(), mode, quality);
             if (temp == null) return;
             long compSize = temp.length();
-            Bitmap bmp = BitmapFactory.decodeFile(temp.getAbsolutePath());
+            // Never decode the temp at full resolution: it is only shown in the compare
+            // overlay, which is bounded by screenMaxDim() just like the original.
+            Bitmap bmp = decodeSampled(temp.getAbsolutePath(), maxDim);
             temp.delete();
             if (bmp == null) return;
             final long fcompSize = compSize;
@@ -201,6 +204,21 @@ public class ViewerActivity extends Activity {
                 if (holding) showCompressed(); // finger still down → reveal as soon as it's ready
             });
         });
+    }
+
+    /** Decode a local file downsampled so its long side stays close to maxLongSide. */
+    private static Bitmap decodeSampled(String path, int maxLongSide) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(path, bounds);
+        int longest = Math.max(bounds.outWidth, bounds.outHeight);
+        int sample = 1;
+        // Halve only while the result still covers maxLongSide, so the compare bitmap is
+        // never upscaled back to the original's pixel size.
+        while (maxLongSide > 0 && longest / (sample * 2) >= maxLongSide) sample *= 2;
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inSampleSize = sample;
+        return BitmapFactory.decodeFile(path, opts);
     }
 
     private void navigateTo(int index) {
