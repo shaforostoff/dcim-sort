@@ -14,6 +14,8 @@ import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.util.ThreadPlanner;
 
 import java.io.InputStream;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -24,6 +26,12 @@ public class ThumbnailLoader {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final LruCache<String, Bitmap> cache;
     private final int size;
+    /**
+     * The photo each grid view is currently bound to. A fling recycles a view through many photos
+     * while its earlier decode is still queued; checking this before decoding means the stale job
+     * costs a map lookup instead of a full image decode. Bounded by the grid's recycled view pool.
+     */
+    private final Map<ImageView, String> bound = new ConcurrentHashMap<>();
 
     public ThumbnailLoader(Context ctx, int sizePx) {
         this.ctx = ctx.getApplicationContext();
@@ -40,7 +48,7 @@ public class ThumbnailLoader {
     public void load(final MediaImage img, final ImageView iv) {
         // Key by img.key(), not id: cloud picks all share id = -1 and would otherwise collide.
         final String key = img.key();
-        iv.setTag(key);
+        bound.put(iv, key);
         Bitmap cached = cache.get(key);
         if (cached != null) {
             iv.setImageBitmap(cached);
@@ -48,13 +56,12 @@ public class ThumbnailLoader {
         }
         iv.setImageBitmap(null);
         pool.execute(() -> {
+            if (!key.equals(bound.get(iv))) return; // view was recycled onto another photo
             final Bitmap b = decode(img);
-            if (b != null) cache.put(key, b);
+            if (b == null) return;
+            cache.put(key, b);
             main.post(() -> {
-                Object tag = iv.getTag();
-                if (key.equals(tag) && b != null) {
-                    iv.setImageBitmap(b);
-                }
+                if (key.equals(bound.get(iv))) iv.setImageBitmap(b);
             });
         });
     }
@@ -75,11 +82,8 @@ public class ThumbnailLoader {
             try (InputStream in = ctx.getContentResolver().openInputStream(img.readUri())) {
                 BitmapFactory.decodeStream(in, null, bounds);
             }
-            int sample = 1;
-            int longest = Math.max(bounds.outWidth, bounds.outHeight);
-            while (longest / sample > size * 2) sample *= 2;
             BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inSampleSize = sample;
+            opts.inSampleSize = sampleSize(Math.max(bounds.outWidth, bounds.outHeight));
             try (InputStream in = ctx.getContentResolver().openInputStream(img.readUri())) {
                 return BitmapFactory.decodeStream(in, null, opts);
             }
@@ -88,8 +92,20 @@ public class ThumbnailLoader {
         }
     }
 
+    /**
+     * Smallest power-of-two subsample whose result still covers the thumbnail slot. Halving only
+     * while the next step would still be big enough keeps every thumbnail in [size, 2 * size) —
+     * the previous bound allowed up to twice that edge, i.e. four times the bytes per cache entry.
+     */
+    private int sampleSize(int longestSide) {
+        int sample = 1;
+        while (longestSide / (sample * 2) >= size) sample *= 2;
+        return sample;
+    }
+
     public void shutdown() {
         pool.shutdownNow();
+        bound.clear();
         cache.evictAll();
     }
 }

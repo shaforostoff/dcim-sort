@@ -37,6 +37,7 @@ import com.shaforostoff.dcimsort.data.SettingsStore;
 import com.shaforostoff.dcimsort.util.Formatter;
 import com.shaforostoff.dcimsort.util.PermissionManager;
 import com.shaforostoff.dcimsort.util.Sdk;
+import com.shaforostoff.dcimsort.util.SystemBars;
 import com.shaforostoff.dcimsort.work.OrganizeRequest;
 import com.shaforostoff.dcimsort.work.OrganizeService;
 import com.shaforostoff.dcimsort.work.Recompressor;
@@ -129,7 +130,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        applySystemBarsInsets();
+        SystemBars.padContent(this);
 
         settings = new SettingsStore(this);
         repo = new MediaRepository(this);
@@ -144,20 +145,6 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             requestNeededPermissions();
             txtPlan.setText(R.string.need_media_permission);
         }
-    }
-
-    private void applySystemBarsInsets() {
-        View root = findViewById(android.R.id.content);
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            if (Sdk.atLeastR()) {
-                v.setPadding(0, insets.getInsets(WindowInsets.Type.systemBars()).top,
-                        0, insets.getInsets(WindowInsets.Type.systemBars()).bottom);
-            } else {
-                v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
-            }
-            return insets;
-        });
-        root.requestApplyInsets();
     }
 
     private void bindViews() {

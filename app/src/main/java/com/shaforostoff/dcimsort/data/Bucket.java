@@ -9,10 +9,6 @@ public class Bucket {
     public final int count;
     public final String volumeName;    // 29+: "external_primary" = internal, else SD UUID; null on legacy
 
-    public Bucket(long id, String displayName, String relativePath, String dataDir, int count) {
-        this(id, displayName, relativePath, dataDir, count, null);
-    }
-
     public Bucket(long id, String displayName, String relativePath, String dataDir, int count,
                   String volumeName) {
         this.id = id;

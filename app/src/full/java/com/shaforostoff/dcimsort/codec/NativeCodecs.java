@@ -36,10 +36,6 @@ public final class NativeCodecs {
 
     private NativeCodecs() {}
 
-    public static boolean isFull() {
-        return true;
-    }
-
     public static boolean avifAvailable() {
         return LOADED && nativeAvifAvailable();
     }

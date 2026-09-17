@@ -3,6 +3,7 @@ package com.shaforostoff.dcimsort.ui;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.ImageDecoder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,6 +20,7 @@ import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.util.Formatter;
 import com.shaforostoff.dcimsort.util.Sdk;
+import com.shaforostoff.dcimsort.util.SystemBars;
 import com.shaforostoff.dcimsort.work.Recompressor;
 
 import java.io.File;
@@ -172,13 +174,22 @@ public class ViewerActivity extends Activity {
         final MediaImage target = image;
         final int gen = generation;
         final int maxDim = screenMaxDim();
+        // buildCompressed() is called from the main thread, so the displayed original (if any) is
+        // settled here. Decoding the temp straight to its pixel size means the compare bitmap is
+        // allocated once at the size we actually show, instead of being decoded large and then
+        // rescaled — which held a third full-resolution bitmap alongside the other two.
+        final Bitmap shown = originalBitmap;
+        final int wantW = shown != null ? shown.getWidth() : 0;
+        final int wantH = shown != null ? shown.getHeight() : 0;
         executor.execute(() -> {
             File temp = rc.compressToTemp(target.readUri(), mode, quality);
             if (temp == null) return;
             long compSize = temp.length();
             // Never decode the temp at full resolution: it is only shown in the compare
             // overlay, which is bounded by screenMaxDim() just like the original.
-            Bitmap bmp = decodeSampled(temp.getAbsolutePath(), maxDim);
+            Bitmap bmp = wantW > 0
+                    ? decodeAt(temp, wantW, wantH)
+                    : decodeSampled(temp.getAbsolutePath(), maxDim);
             temp.delete();
             if (bmp == null) return;
             final long fcompSize = compSize;
@@ -188,7 +199,8 @@ public class ViewerActivity extends Activity {
                     fbmp.recycle();
                     return;
                 }
-                // Match the displayed original's pixel dimensions so the matrix maps identically.
+                // The matrix maps identically only at the original's pixel size; decodeAt normally
+                // lands there exactly, so this is a backstop for the legacy/no-original paths.
                 Bitmap toUse = fbmp;
                 if (originalBitmap != null
                         && (fbmp.getWidth() != originalBitmap.getWidth()
@@ -204,6 +216,22 @@ public class ViewerActivity extends Activity {
                 if (holding) showCompressed(); // finger still down → reveal as soon as it's ready
             });
         });
+    }
+
+    /** Decodes a local file to exactly {@code targetW} x {@code targetH} in a single allocation. */
+    private static Bitmap decodeAt(File file, int targetW, int targetH) {
+        if (Sdk.atLeastP()) {
+            try {
+                ImageDecoder.Source src = ImageDecoder.createSource(file);
+                return ImageDecoder.decodeBitmap(src, (decoder, info, source) -> {
+                    decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                    decoder.setTargetSize(targetW, targetH);
+                });
+            } catch (Exception ignore) {
+                // fall through to the sample-and-scale path
+            }
+        }
+        return decodeSampled(file.getAbsolutePath(), Math.max(targetW, targetH));
     }
 
     /** Decode a local file downsampled so its long side stays close to maxLongSide. */
@@ -261,27 +289,13 @@ public class ViewerActivity extends Activity {
         final int base16 = Math.round(16 * getResources().getDisplayMetrics().density);
         View root = findViewById(android.R.id.content);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int bottom = bottomInset(insets);
+            int bottom = SystemBars.bottom(insets);
             setBottomMargin(hint, base16 + bottom);
             setBottomMargin(overlay, bottom);
-            setTopMargin(btnExclude, base16 + topInset(insets));
+            setTopMargin(btnExclude, base16 + SystemBars.top(insets));
             return insets;
         });
         root.requestApplyInsets();
-    }
-
-    private static int bottomInset(WindowInsets insets) {
-        if (Sdk.atLeastR()) {
-            return insets.getInsets(WindowInsets.Type.systemBars()).bottom;
-        }
-        return insets.getSystemWindowInsetBottom();
-    }
-
-    private static int topInset(WindowInsets insets) {
-        if (Sdk.atLeastR()) {
-            return insets.getInsets(WindowInsets.Type.systemBars()).top;
-        }
-        return insets.getSystemWindowInsetTop();
     }
 
     private static void setBottomMargin(View v, int margin) {

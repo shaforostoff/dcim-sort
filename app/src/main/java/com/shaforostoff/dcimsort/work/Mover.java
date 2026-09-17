@@ -11,11 +11,12 @@ import android.util.Log;
 
 import com.shaforostoff.dcimsort.data.CompressMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
+import com.shaforostoff.dcimsort.util.Io;
 import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 
 /**
@@ -82,19 +83,19 @@ public class Mover {
 
     private Outcome moveViaMediaStore(MediaImage img, String sourceRel, String folder) {
         String newRel = childRelativePath(sourceRel, folder);
-        Log.e(TAG, "move uri=" + img.contentUri() + " relPath=" + img.relativePath + " newRel=" + newRel);
+        Log.d(TAG, "move uri=" + img.contentUri() + " relPath=" + img.relativePath + " newRel=" + newRel);
         if (img.relativePath != null && img.relativePath.equalsIgnoreCase(newRel)) {
-            Log.e(TAG, "move SKIPPED (same rel path)");
+            Log.d(TAG, "move SKIPPED (same rel path)");
             return Outcome.SKIPPED;
         }
         ContentValues cv = new ContentValues();
         cv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
         try {
             int n = resolver().update(img.contentUri(), cv, null, null);
-            Log.e(TAG, "move update returned " + n);
+            Log.d(TAG, "move update returned " + n);
             return n > 0 ? Outcome.MOVED : Outcome.FAILED;
         } catch (Exception e) {
-            Log.e(TAG, "move update exception", e);
+            Log.w(TAG, "move update exception", e);
             return Outcome.FAILED;
         }
     }
@@ -112,7 +113,7 @@ public class Mover {
         boolean ok = srcFile.renameTo(dst);
         if (!ok) {
             try {
-                copyFile(srcFile, dst);
+                Io.copyFile(srcFile, dst);
                 ok = srcFile.delete();
             } catch (IOException e) {
                 dst.delete();
@@ -121,6 +122,59 @@ public class Mover {
         }
         scan(srcFile.getAbsolutePath(), dst.getAbsolutePath());
         return ok ? Outcome.MOVED : Outcome.FAILED;
+    }
+
+    // ---- Shared MediaStore insert plumbing ---------------------------------
+
+    /**
+     * Destination relative path for a newly inserted row. The images/media collection only accepts
+     * DCIM/ or Pictures/ as the top-level directory, so anything else is redirected under DCIM/Camera/.
+     */
+    private static String insertableRelativePath(String sourceRel, String folder) {
+        String newRel = childRelativePath(sourceRel, folder);
+        if (!newRel.startsWith("DCIM/") && !newRel.startsWith("Pictures/")) {
+            newRel = "DCIM/Camera/" + folder + "/";
+        }
+        return newRel;
+    }
+
+    /**
+     * Inserts a new pending image row on the source's storage volume, carrying over the favourite
+     * flag and description. {@code tag} only labels the log line. Returns null if the insert failed.
+     */
+    private Uri insertPending(MediaImage img, String newName, String mime, String newRel,
+                              String volumeName, String tag) {
+        ContentValues cv = new ContentValues();
+        cv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
+        cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+        cv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
+        cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+        if (img.favorite && Sdk.atLeastR()) cv.put(MediaStore.MediaColumns.IS_FAVORITE, 1);
+        if (img.description != null) {
+            cv.put(MediaStore.Images.ImageColumns.DESCRIPTION, img.description);
+        }
+
+        Uri insertUri = IMAGES;
+        if (Sdk.atLeastQ() && volumeName != null && !"external".equals(volumeName)) {
+            try { insertUri = MediaStore.Images.Media.getContentUri(volumeName); }
+            catch (Exception ignore) {}
+        }
+        try {
+            Uri newUri = resolver().insert(insertUri, cv);
+            if (newUri == null) Log.d(TAG, tag + " insert returned null");
+            return newUri;
+        } catch (Exception e) {
+            Log.d(TAG, tag + " insert threw: " + e);
+            return null;
+        }
+    }
+
+    /** Clears IS_PENDING so the row becomes visible, then confirms it actually has bytes. */
+    private boolean commitAndVerify(Uri newUri) {
+        ContentValues done = new ContentValues();
+        done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+        resolver().update(newUri, done, null, null);
+        return verify(newUri);
     }
 
     // ---- Publish recompressed ----------------------------------------------
@@ -135,11 +189,7 @@ public class Mover {
 
     private boolean publishViaMediaStore(MediaImage img, File temp, CompressMode mode,
                                          String sourceRel, String folder, String volumeName) {
-        String newRel = childRelativePath(sourceRel, folder);
-        // MediaStore insert into images/media only accepts DCIM/ or Pictures/ as the top-level dir.
-        if (!newRel.startsWith("DCIM/") && !newRel.startsWith("Pictures/")) {
-            newRel = "DCIM/Camera/" + folder + "/";
-        }
+        String newRel = insertableRelativePath(sourceRel, folder);
         String newName = baseName(img.displayName) + Recompressor.extensionFor(mode);
         Uri origUri = img.contentUri();
 
@@ -163,7 +213,7 @@ public class Mover {
                 boolean writeOk = false;
                 try {
                     Log.d(TAG, "OVW writing tempSize=" + temp.length());
-                    writeFileTo(temp, os);
+                    Io.copyFileTo(temp, os);
                     writeOk = true;
                 } catch (Exception e) {
                     Log.d(TAG,"OVW write failed: " + e);
@@ -202,43 +252,16 @@ public class Mover {
 
     private boolean publishViaMediaStoreInsert(MediaImage img, File temp, CompressMode mode,
                                                String newRel, String newName, String volumeName) {
-        ContentValues cv = new ContentValues();
-        cv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
-        cv.put(MediaStore.MediaColumns.MIME_TYPE, Recompressor.mimeFor(mode));
-        cv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
-        cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
-        if (img.favorite && Sdk.atLeastR()) {
-            cv.put(MediaStore.MediaColumns.IS_FAVORITE, 1);
-        }
-        if (img.description != null) {
-            cv.put(MediaStore.Images.ImageColumns.DESCRIPTION, img.description);
-        }
-
-        Uri insertUri = IMAGES;
-        if (Sdk.atLeastQ() && volumeName != null && !"external".equals(volumeName)) {
-            try { insertUri = MediaStore.Images.Media.getContentUri(volumeName); }
-            catch (Exception ignore) {}
-        }
-        Uri newUri;
-        try {
-            newUri = resolver().insert(insertUri, cv);
-        } catch (Exception e) {
-            Log.d(TAG,"INS insert threw: " + e);
-            return false;
-        }
-        if (newUri == null) { Log.d(TAG,"INS insert returned null"); return false; }
+        Uri newUri = insertPending(img, newName, Recompressor.mimeFor(mode), newRel, volumeName, "INS");
+        if (newUri == null) return false;
 
         journal.begin(img.id, newUri);
         try {
             try (OutputStream os = resolver().openOutputStream(newUri)) {
                 if (os == null) throw new IOException("null output stream");
-                writeFileTo(temp, os);
+                Io.copyFileTo(temp, os);
             }
-            ContentValues done = new ContentValues();
-            done.put(MediaStore.MediaColumns.IS_PENDING, 0);
-            resolver().update(newUri, done, null, null);
-
-            if (!verify(newUri)) {
+            if (!commitAndVerify(newUri)) {
                 Log.d(TAG,"INS verify FAILED newUri=" + newUri);
                 safeDelete(newUri);
                 journal.abort(img.id);
@@ -293,47 +316,21 @@ public class Mover {
                               String sourceRel, String folder, String volumeName) {
         if (folder == null) return false;
         boolean recompress = recompressedTemp != null;
-        String newRel = childRelativePath(sourceRel, folder);
-        // MediaStore insert into images/media only accepts DCIM/ or Pictures/ as the top-level dir.
-        if (!newRel.startsWith("DCIM/") && !newRel.startsWith("Pictures/")) {
-            newRel = "DCIM/Camera/" + folder + "/";
-        }
+        String newRel = insertableRelativePath(sourceRel, folder);
         String mime = recompress ? Recompressor.mimeFor(mode)
                 : (img.mimeType != null ? img.mimeType : "image/jpeg");
         String ext = recompress ? Recompressor.extensionFor(mode) : extensionFromName(img.displayName);
         String newName = baseName(img.displayName) + ext;
 
-        ContentValues cv = new ContentValues();
-        cv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
-        cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
-        cv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
-        cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
-        if (img.favorite && Sdk.atLeastR()) cv.put(MediaStore.MediaColumns.IS_FAVORITE, 1);
-        if (img.description != null) cv.put(MediaStore.Images.ImageColumns.DESCRIPTION, img.description);
-
-        Uri insertUri = IMAGES;
-        if (Sdk.atLeastQ() && volumeName != null && !"external".equals(volumeName)) {
-            try { insertUri = MediaStore.Images.Media.getContentUri(volumeName); }
-            catch (Exception ignore) {}
-        }
-        Uri newUri;
-        try {
-            newUri = resolver().insert(insertUri, cv);
-        } catch (Exception e) {
-            Log.d(TAG, "CPY insert threw: " + e);
-            return false;
-        }
-        if (newUri == null) { Log.d(TAG, "CPY insert returned null"); return false; }
+        Uri newUri = insertPending(img, newName, mime, newRel, volumeName, "CPY");
+        if (newUri == null) return false;
         try {
             try (OutputStream os = resolver().openOutputStream(newUri)) {
                 if (os == null) throw new IOException("null output stream");
-                if (recompress) writeFileTo(recompressedTemp, os);
+                if (recompress) Io.copyFileTo(recompressedTemp, os);
                 else copyFromUri(img.readUri(), os);
             }
-            ContentValues done = new ContentValues();
-            done.put(MediaStore.MediaColumns.IS_PENDING, 0);
-            resolver().update(newUri, done, null, null);
-            if (!verify(newUri)) {
+            if (!commitAndVerify(newUri)) {
                 Log.d(TAG, "CPY verify FAILED newUri=" + newUri);
                 safeDelete(newUri);
                 return false;
@@ -347,12 +344,9 @@ public class Mover {
     }
 
     private void copyFromUri(Uri uri, OutputStream out) throws IOException {
-        try (java.io.InputStream in = resolver().openInputStream(uri)) {
+        try (InputStream in = resolver().openInputStream(uri)) {
             if (in == null) throw new IOException("null input stream " + uri);
-            byte[] buf = new byte[64 * 1024];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            out.flush();
+            Io.copy(in, out);
         }
     }
 
@@ -374,7 +368,7 @@ public class Mover {
         File dst = uniqueFile(destDir, baseName(srcFile.getName()) + Recompressor.extensionFor(mode));
         File tmp = new File(destDir, "." + dst.getName() + ".tmp");
         try {
-            copyFile(temp, tmp);
+            Io.copyFile(temp, tmp);
             if (!tmp.renameTo(dst)) {
                 tmp.delete();
                 return false;
@@ -414,22 +408,4 @@ public class Mover {
         }
     }
 
-    private static void writeFileTo(File src, OutputStream out) throws IOException {
-        try (FileInputStream in = new FileInputStream(src)) {
-            byte[] buf = new byte[64 * 1024];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            out.flush();
-        }
-    }
-
-    private static void copyFile(File src, File dst) throws IOException {
-        try (FileInputStream in = new FileInputStream(src);
-             OutputStream out = new java.io.FileOutputStream(dst)) {
-            byte[] buf = new byte[64 * 1024];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            out.flush();
-        }
-    }
 }

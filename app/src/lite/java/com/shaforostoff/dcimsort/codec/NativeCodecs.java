@@ -12,11 +12,6 @@ import java.io.File;
 public final class NativeCodecs {
     private NativeCodecs() {}
 
-    /** True only in the full flavor. */
-    public static boolean isFull() {
-        return false;
-    }
-
     /** libavif (HDR/EXIF AVIF encoder) — never available in lite. */
     public static boolean avifAvailable() {
         return false;

@@ -5,10 +5,12 @@ import android.content.Context;
 import android.net.Uri;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -18,9 +20,15 @@ import java.util.Set;
  * Tiny append-only log of in-flight recompress operations, in app-private files. Lets a crash or
  * forced stop be reconciled so we never leave both a newly written file and its original: any
  * "begun but not completed" new file is rolled back (deleted), leaving the untouched original.
+ *
+ * <p>The writer is opened once and kept for the run, flushed after every entry. Durability is the
+ * same as reopening the file per line — the bytes are on their way to disk before the caller
+ * proceeds — but a large job pays one open instead of two per photo, all of them serialized on
+ * this object's lock across every worker thread.
  */
 public class OrganizeJournal {
     private final File file;
+    private Writer writer;
 
     public OrganizeJournal(Context ctx) {
         this.file = new File(ctx.getApplicationContext().getFilesDir(), "organize_journal.tsv");
@@ -39,10 +47,24 @@ public class OrganizeJournal {
         append("X\t" + id + "\n");
     }
 
-    private void append(String line) {
-        try (FileWriter w = new FileWriter(file, true)) {
-            w.write(line);
+    /** Releases the open writer. Safe to call more than once; appending again reopens it. */
+    public synchronized void close() {
+        if (writer == null) return;
+        try {
+            writer.close();
         } catch (IOException ignore) {
+        } finally {
+            writer = null;
+        }
+    }
+
+    private void append(String line) {
+        try {
+            if (writer == null) writer = new BufferedWriter(new FileWriter(file, true));
+            writer.write(line);
+            writer.flush(); // the entry has to survive a kill before the caller acts on it
+        } catch (IOException ignore) {
+            close(); // drop the broken writer so the next append can retry from scratch
         }
     }
 
@@ -51,6 +73,7 @@ public class OrganizeJournal {
      * Call on service start.
      */
     public synchronized void reconcile(ContentResolver resolver) {
+        close();
         if (!file.exists()) return;
         List<String[]> begins = new ArrayList<>();
         Set<Long> resolved = new HashSet<>();

@@ -10,7 +10,6 @@
     <string name="pick_files">Datoteke</string>
     <string name="no_folder_selected">Mapa ni izbrana</string>
     <string name="counting">Štetje…</string>
-    <string name="calculating_size">računanje velikosti…</string>
     <string name="photos_count_only">%1$d fotografij</string>
 
     <string name="groupfolder_label">Združi v mape</string>
@@ -38,9 +37,7 @@
     <string name="date_to_label">Do %1$s</string>
 
     <!-- Plan summary (above action buttons) -->
-    <string name="plan_summary_estimated">%1$d datotek · ~%2$s</string>
     <string name="plan_summary_exact">%1$d datotek · %2$s</string>
-    <string name="plan_estimating">%1$d datotek · ocenjevanje…</string>
     <string name="plan_summary_from">%1$d datotek · %2$s → ~%3$s</string>
     <string name="plan_estimating_from">%1$d datotek · %2$s → ocenjevanje…</string>
 
@@ -50,8 +47,6 @@
 
     <!-- Permissions -->
     <string name="need_media_permission">Za branje vaših slik je potrebno dovoljenje za shrambo/fotografije.</string>
-    <string name="need_media_location">Dovolite lokacijo medijev za branje GPS fotografij za imena krajev.</string>
-    <string name="grant">Dovoli</string>
 
     <!-- Progress -->
     <string name="organizing_progress">%1$d / %2$d · %3$s</string>
@@ -68,7 +63,6 @@
     <string name="preview_empty">Ni fotografij za organiziranje.</string>
 
     <!-- Viewer -->
-    <string name="exclude">Izključi</string>
     <string name="include">Vključi</string>
     <string name="compare_overlay">%1$s → %2$s</string>
     <string name="hold_to_compare">Pridržite za primerjavo s stisnjeno različico</string>
@@ -80,7 +74,6 @@
     <string name="sort_by_name">A–Z</string>
 
     <!-- Misc -->
-    <string name="unknown_place">Neznano</string>
     <string name="today">Danes</string>
     <string name="select_folder_first">Najprej izberite mapo.</string>
     <string name="no_photos">V tej mapi ni fotografij.</string>

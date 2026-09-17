@@ -14,11 +14,6 @@ public class DateRange {
         this.toMillis = toMillis;
     }
 
-    /** A range that includes everything. */
-    public static DateRange all() {
-        return new DateRange(Long.MIN_VALUE, Long.MAX_VALUE);
-    }
-
     public boolean contains(long dateTakenMillis) {
         if (dateTakenMillis <= 0) return true;
         return dateTakenMillis >= fromMillis && dateTakenMillis <= toMillis;

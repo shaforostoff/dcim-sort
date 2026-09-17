@@ -21,8 +21,10 @@ import com.shaforostoff.dcimsort.codec.GainmapMeta;
 import com.shaforostoff.dcimsort.codec.NativeCodecs;
 import com.shaforostoff.dcimsort.data.CompressMode;
 import com.shaforostoff.dcimsort.data.MediaRepository;
+import com.shaforostoff.dcimsort.util.Io;
 import com.shaforostoff.dcimsort.util.Sdk;
 
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -141,11 +143,7 @@ public class Recompressor {
      * @return the temp file, or null on failure.
      */
     public File compressToTemp(Uri source, CompressMode mode, int quality) {
-        return compressToTemp(source, mode, quality, MAX_LONG_SIDE);
-    }
-
-    public File compressToTemp(Uri source, CompressMode mode, int quality, int maxLongSide) {
-        return compressToTemp(source, mode, quality, maxLongSide, true);
+        return compressToTemp(source, mode, quality, MAX_LONG_SIDE, true);
     }
 
     /**
@@ -281,11 +279,6 @@ public class Recompressor {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    /** Size in bytes the image would occupy after compression, or -1 on failure. */
-    public long encodedSize(Uri source, CompressMode mode, int quality) {
-        return encodedSize(source, mode, quality, MAX_LONG_SIDE);
     }
 
     /**
@@ -720,26 +713,19 @@ public class Recompressor {
             }
             byte[] newMeta = box("meta", metaC.toByteArray());
 
-            ByteArrayOutputStream outBuf = new ByteArrayOutputStream(
-                    data.length + newMeta.length + exifPayload.length + 16);
-            outBuf.write(data, 0, meta.start);
-            outBuf.write(newMeta, 0, newMeta.length);
-            outBuf.write(data, metaEnd, data.length - metaEnd);
-            ByteArrayOutputStream mdat = new ByteArrayOutputStream();
-            w32(mdat, 8L + exifPayload.length);
-            writeType(mdat, "mdat");
-            outBuf.write(mdat.toByteArray(), 0, 8);
-            outBuf.write(exifPayload, 0, exifPayload.length);
-
-            byte[] result = outBuf.toByteArray();
+            // Stream the rebuilt file straight out. Buffering it first would hold the whole image
+            // twice more on top of `data` — three copies of a 20 MB HEIC, times every worker.
             File tmp = File.createTempFile("heifx_", ".tmp", ctx.getCacheDir());
-            try (FileOutputStream fos = new FileOutputStream(tmp)) {
-                fos.write(result);
+            try (OutputStream out = new BufferedOutputStream(new FileOutputStream(tmp), 64 * 1024)) {
+                out.write(data, 0, meta.start);
+                out.write(newMeta, 0, newMeta.length);
+                out.write(data, metaEnd, data.length - metaEnd);
+                writeMdatHeader(out, exifPayload.length);
+                out.write(exifPayload, 0, exifPayload.length);
             }
             if (!tmp.renameTo(file)) {
-                try (FileOutputStream fos = new FileOutputStream(file)) {
-                    fos.write(result);
-                }
+                // rename can fail across filesystems; copy the finished temp over instead.
+                Io.copyFile(tmp, file);
                 tmp.delete();
             }
             return true;
@@ -922,6 +908,16 @@ public class Recompressor {
             while (off < b.length && (r = in.read(b, off, b.length - off)) > 0) off += r;
         }
         return b;
+    }
+
+    /** Writes the 8-byte {@code mdat} box header for a payload of {@code payloadLen} bytes. */
+    private static void writeMdatHeader(OutputStream o, int payloadLen) throws IOException {
+        long size = 8L + payloadLen;
+        o.write((int) ((size >>> 24) & 0xFF));
+        o.write((int) ((size >>> 16) & 0xFF));
+        o.write((int) ((size >>> 8) & 0xFF));
+        o.write((int) (size & 0xFF));
+        o.write('m'); o.write('d'); o.write('a'); o.write('t');
     }
 
     private static byte[] box(String type, byte[] content) {

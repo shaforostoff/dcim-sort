@@ -21,19 +21,9 @@ public final class Sdk {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
     }
 
-    /** Android 12 (API 31). */
-    public static boolean atLeastS() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
-    }
-
     /** Android 13 (API 33) — READ_MEDIA_IMAGES, async Geocoder, POST_NOTIFICATIONS. */
     public static boolean atLeastT() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
-    }
-
-    /** Android 14 (API 34) — typed foreground services. */
-    public static boolean atLeastU() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
     }
 
     /** Android 16 (API 36) — mandated AV1 image encoder; AVIF encoding available. */

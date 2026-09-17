@@ -10,7 +10,6 @@
     <string name="pick_files">Файли</string>
     <string name="no_folder_selected">Папку не вибрано</string>
     <string name="counting">Підрахунок…</string>
-    <string name="calculating_size">обчислення розміру…</string>
     <string name="photos_count_only">%1$d фото</string>
 
     <string name="groupfolder_label">Групувати в папки</string>
@@ -38,9 +37,7 @@
     <string name="date_to_label">До %1$s</string>
 
     <!-- Plan summary (above action buttons) -->
-    <string name="plan_summary_estimated">%1$d файлів · ~%2$s</string>
     <string name="plan_summary_exact">%1$d файлів · %2$s</string>
-    <string name="plan_estimating">%1$d файлів · оцінка…</string>
     <string name="plan_summary_from">%1$d файлів · %2$s → ~%3$s</string>
     <string name="plan_estimating_from">%1$d файлів · %2$s → оцінка…</string>
 
@@ -50,8 +47,6 @@
 
     <!-- Permissions -->
     <string name="need_media_permission">Для читання ваших зображень потрібен дозвіл на доступ до сховища/фото.</string>
-    <string name="need_media_location">Дозвольте доступ до геоданих медіа, щоб визначати назви місць за GPS фото.</string>
-    <string name="grant">Дозволити</string>
 
     <!-- Progress -->
     <string name="organizing_progress">%1$d / %2$d · %3$s</string>
@@ -68,7 +63,6 @@
     <string name="preview_empty">Немає фото для організації.</string>
 
     <!-- Viewer -->
-    <string name="exclude">Виключити</string>
     <string name="include">Включити</string>
     <string name="compare_overlay">%1$s → %2$s</string>
     <string name="hold_to_compare">Утримуйте, щоб порівняти зі стисненим</string>
@@ -80,7 +74,6 @@
     <string name="sort_by_name">A–Z</string>
 
     <!-- Misc -->
-    <string name="unknown_place">Невідомо</string>
     <string name="today">Сьогодні</string>
     <string name="select_folder_first">Спочатку виберіть папку.</string>
     <string name="no_photos">У цій папці немає фото.</string>

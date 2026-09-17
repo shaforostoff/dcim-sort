@@ -16,6 +16,7 @@ import com.shaforostoff.dcimsort.data.Bucket;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.data.SettingsStore;
 import com.shaforostoff.dcimsort.util.Sdk;
+import com.shaforostoff.dcimsort.util.SystemBars;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,7 +41,7 @@ public class FolderPickerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_folder_picker);
-        applySystemBarsInsets();
+        SystemBars.padContent(this);
         settings = new SettingsStore(this);
         list = findViewById(R.id.list);
         empty = findViewById(R.id.empty);
@@ -143,20 +144,6 @@ public class FolderPickerActivity extends Activity {
         String path = b.relativePath != null ? b.relativePath
                 : (b.dataDir != null ? b.dataDir : b.displayName);
         return (isSd ? "1" : "0") + path;
-    }
-
-    private void applySystemBarsInsets() {
-        View root = findViewById(android.R.id.content);
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            if (Sdk.atLeastR()) {
-                v.setPadding(0, insets.getInsets(WindowInsets.Type.systemBars()).top,
-                        0, insets.getInsets(WindowInsets.Type.systemBars()).bottom);
-            } else {
-                v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
-            }
-            return insets;
-        });
-        root.requestApplyInsets();
     }
 
     @Override

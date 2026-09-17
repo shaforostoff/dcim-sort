@@ -18,10 +18,6 @@ public class TargetResolver {
     private final GroupMode groupMode;
     private final CoordCache coords; // nullable; skips re-reading EXIF on repeat runs
 
-    public TargetResolver(GeoExtractor geo, PlaceResolver places, GroupMode groupMode) {
-        this(geo, places, groupMode, null);
-    }
-
     public TargetResolver(GeoExtractor geo, PlaceResolver places, GroupMode groupMode,
                           CoordCache coords) {
         this.geo = geo;

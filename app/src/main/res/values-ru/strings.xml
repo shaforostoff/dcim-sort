@@ -10,7 +10,6 @@
     <string name="pick_files">Файлы</string>
     <string name="no_folder_selected">Папка не выбрана</string>
     <string name="counting">Подсчёт…</string>
-    <string name="calculating_size">вычисление размера…</string>
     <string name="photos_count_only">%1$d фото</string>
 
     <string name="groupfolder_label">Группировать по папкам</string>
@@ -38,9 +37,7 @@
     <string name="date_to_label">По %1$s</string>
 
     <!-- Plan summary (above action buttons) -->
-    <string name="plan_summary_estimated">%1$d файлов · ~%2$s</string>
     <string name="plan_summary_exact">%1$d файлов · %2$s</string>
-    <string name="plan_estimating">%1$d файлов · оценка…</string>
     <string name="plan_summary_from">%1$d файлов · %2$s → ~%3$s</string>
     <string name="plan_estimating_from">%1$d файлов · %2$s → оценка…</string>
 
@@ -50,8 +47,6 @@
 
     <!-- Permissions -->
     <string name="need_media_permission">Для чтения ваших изображений требуется разрешение на доступ к хранилищу/фото.</string>
-    <string name="need_media_location">Разрешите доступ к геоданным фото, чтобы определять названия мест.</string>
-    <string name="grant">Разрешить</string>
 
     <!-- Progress -->
     <string name="organizing_progress">%1$d / %2$d · %3$s</string>
@@ -68,7 +63,6 @@
     <string name="preview_empty">Нет фото для организации.</string>
 
     <!-- Viewer -->
-    <string name="exclude">Исключить</string>
     <string name="include">Включить</string>
     <string name="compare_overlay">%1$s → %2$s</string>
     <string name="hold_to_compare">Удерживайте для сравнения со сжатым</string>
@@ -80,7 +74,6 @@
     <string name="sort_by_name">A–Z</string>
 
     <!-- Misc -->
-    <string name="unknown_place">Неизвестно</string>
     <string name="today">Сегодня</string>
     <string name="select_folder_first">Сначала выберите папку.</string>
     <string name="no_photos">В этой папке нет фото.</string>

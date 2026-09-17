@@ -10,7 +10,6 @@
     <string name="pick_files">Archivos</string>
     <string name="no_folder_selected">Ninguna carpeta seleccionada</string>
     <string name="counting">Contando…</string>
-    <string name="calculating_size">calculando tamaño…</string>
     <string name="photos_count_only">%1$d fotos</string>
 
     <string name="groupfolder_label">Agrupar en carpetas</string>
@@ -38,9 +37,7 @@
     <string name="date_to_label">Hasta %1$s</string>
 
     <!-- Plan summary (above action buttons) -->
-    <string name="plan_summary_estimated">%1$d archivos · ~%2$s</string>
     <string name="plan_summary_exact">%1$d archivos · %2$s</string>
-    <string name="plan_estimating">%1$d archivos · estimando…</string>
     <string name="plan_summary_from">%1$d archivos · %2$s → ~%3$s</string>
     <string name="plan_estimating_from">%1$d archivos · %2$s → estimando…</string>
 
@@ -50,8 +47,6 @@
 
     <!-- Permissions -->
     <string name="need_media_permission">Se requiere permiso de almacenamiento/fotos para leer tus imágenes.</string>
-    <string name="need_media_location">Permite la ubicación de los medios para leer el GPS de las fotos y obtener nombres de lugares.</string>
-    <string name="grant">Conceder</string>
 
     <!-- Progress -->
     <string name="organizing_progress">%1$d / %2$d · %3$s</string>
@@ -68,7 +63,6 @@
     <string name="preview_empty">No hay fotos para organizar.</string>
 
     <!-- Viewer -->
-    <string name="exclude">Excluir</string>
     <string name="include">Incluir</string>
     <string name="compare_overlay">%1$s → %2$s</string>
     <string name="hold_to_compare">Mantén pulsado para comparar con la versión comprimida</string>
@@ -80,7 +74,6 @@
     <string name="sort_by_name">A–Z</string>
 
     <!-- Misc -->
-    <string name="unknown_place">Desconocido</string>
     <string name="today">Hoy</string>
     <string name="select_folder_first">Selecciona primero una carpeta.</string>
     <string name="no_photos">No hay fotos en esta carpeta.</string>

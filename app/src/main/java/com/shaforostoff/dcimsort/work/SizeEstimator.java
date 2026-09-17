@@ -2,6 +2,7 @@ package com.shaforostoff.dcimsort.work;
 
 import com.shaforostoff.dcimsort.data.CompressMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
+import com.shaforostoff.dcimsort.util.ThreadPlanner;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,6 +52,21 @@ public final class SizeEstimator {
      */
     private static final int CALIBRATION_LONG_SIDE = 2048;
 
+    /** Rough transient cost of one calibration worker: a 2048-long-side bitmap plus encode scratch. */
+    private static final long CALIBRATION_WORKER_BYTES = 32L * 1024 * 1024;
+
+    /**
+     * Concurrency for sample encoding, capped by cores and by this process's own heap headroom —
+     * four simultaneous 2048px decodes are enough to push a small-heap device into trouble.
+     */
+    private static int calibrationThreads(int samples) {
+        Runtime rt = Runtime.getRuntime();
+        long headroom = rt.maxMemory() - rt.totalMemory() + rt.freeMemory();
+        int byMemory = (int) Math.max(1, headroom / CALIBRATION_WORKER_BYTES);
+        int byCpu = Math.max(1, rt.availableProcessors());
+        return Math.max(1, Math.min(samples, Math.min(byCpu, byMemory)));
+    }
+
     /** Cooperative cancellation so stale/aborted estimates stop quickly. */
     public interface Cancel {
         boolean cancelled();
@@ -72,8 +88,10 @@ public final class SizeEstimator {
         }
         if (samples.isEmpty()) return defaultRatio(mode);
 
-        // Encode the samples in parallel (one thread each) at the reduced calibration resolution.
-        ExecutorService pool = Executors.newFixedThreadPool(samples.size());
+        // Encode the samples in parallel at the reduced calibration resolution, on background-
+        // priority threads so calibration never competes with the UI for big cores.
+        ExecutorService pool = Executors.newFixedThreadPool(
+                calibrationThreads(samples.size()), ThreadPlanner.backgroundFactory("estimate"));
         List<Future<double[]>> futures = new ArrayList<>(samples.size());
         try {
             for (MediaImage img : samples) {
@@ -129,19 +147,6 @@ public final class SizeEstimator {
             est += e;
         }
         return est;
-    }
-
-    /** Convenience: calibrate then estimate over the same image set. */
-    public static long estimateTotal(List<MediaImage> images, CompressMode mode, int quality,
-                                     boolean skipFav, boolean skipLowGain, int minGainPercent,
-                                     Recompressor rc, Cancel cancel) {
-        if (!mode.recompresses()) {
-            long sum = 0;
-            for (MediaImage m : images) sum += m.size;
-            return sum;
-        }
-        double ratio = calibrateRatio(images, mode, quality, rc, cancel);
-        return estimateWithRatio(images, ratio, mode, skipFav, skipLowGain, minGainPercent);
     }
 
     public static double defaultRatio(CompressMode mode) {

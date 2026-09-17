@@ -30,7 +30,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -48,6 +47,8 @@ public class OrganizeService extends Service {
 
     private static final String CHANNEL_ID = "organize";
     private static final int NOTI_ID = 1001;
+    /** Progress is published to the UI and the notification at most this often. */
+    private static final long UI_PUBLISH_INTERVAL_MS = 250;
 
     /** Listener for the foreground UI. */
     public interface Listener {
@@ -57,7 +58,7 @@ public class OrganizeService extends Service {
 
     // Last-known state so a freshly-bound Activity renders immediately.
     public static volatile boolean RUNNING = false;
-    public static volatile int P_DONE, P_TOTAL, P_MOVED, P_SKIPPED, P_FAILED;
+    public static volatile int P_DONE, P_TOTAL;
     public static volatile String P_FOLDER = "";
     private static volatile Listener listener;
 
@@ -68,7 +69,7 @@ public class OrganizeService extends Service {
     private final AtomicBoolean stop = new AtomicBoolean(false);
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile String currentFolder = "";
-    private long lastNotifyAt = 0;
+    private volatile long lastPublishAt = 0;
     private Thread control;
 
     @Override
@@ -94,7 +95,6 @@ public class OrganizeService extends Service {
         stop.set(false);
         P_DONE = 0;
         P_TOTAL = req.images.size();
-        P_MOVED = P_SKIPPED = P_FAILED = 0;
         P_FOLDER = "";
 
         createChannel();
@@ -143,11 +143,12 @@ public class OrganizeService extends Service {
         final AtomicInteger sinceFlush = new AtomicInteger();
         // Distinct destination subfolders that actually received a file, for the completion summary.
         final Set<String> destFolders = ConcurrentHashMap.newKeySet();
-        List<Future<?>> futures = new ArrayList<>();
 
         for (final MediaImage img : req.images) {
             if (stop.get()) break;
-            futures.add(pool.submit(() -> {
+            // execute(), not submit(): the task body already catches Throwable, so a Future would
+            // only add a per-image object retained until the run ends.
+            pool.execute(() -> {
                 if (stop.get()) return;
                 try {
                     String folder = targets.folderFor(img);
@@ -208,14 +209,14 @@ public class OrganizeService extends Service {
                     android.util.Log.e("DCIMSort", "organize error: " + img.contentUri(), t);
                 } finally {
                     int d = done.incrementAndGet();
-                    publish(d, total, currentFolder, moved.get(), skipped.get(), failed.get());
+                    publish(d, total, currentFolder);
                     if (sinceFlush.incrementAndGet() >= 25) {
                         sinceFlush.set(0);
                         cache.flush();
                         coordCache.flush();
                     }
                 }
-            }));
+            });
         }
 
         pool.shutdown();
@@ -232,6 +233,7 @@ public class OrganizeService extends Service {
         }
         cache.flush();
         coordCache.flush();
+        journal.close();
 
         // The batch just freed a burst of large native encode buffers (jpegli/libavif). Nudge the
         // native allocator to hand those pages back to the OS instead of caching them while idle.
@@ -262,24 +264,26 @@ public class OrganizeService extends Service {
                 && temp.length() > img.size * keepRatio;
     }
 
-    private void publish(int done, int total, String folder,
-                         int moved, int skipped, int failed) {
+    /**
+     * Records progress and, at most a few times a second, pushes it to the UI and the notification.
+     * The statics are always current, so a resuming Activity reads them directly and never misses
+     * the final state; posting every completed image would only flood the main looper to nudge a
+     * progress bar. The last update always goes through.
+     */
+    private void publish(int done, int total, String folder) {
         P_DONE = done;
         P_TOTAL = total;
-        P_MOVED = moved;
-        P_SKIPPED = skipped;
-        P_FAILED = failed;
         P_FOLDER = folder;
+        long now = System.currentTimeMillis();
+        boolean last = done == total;
+        if (now - lastPublishAt < UI_PUBLISH_INTERVAL_MS && !last) return;
+        lastPublishAt = now;
         main.post(() -> {
             Listener l = listener;
             if (l != null) l.onProgress(done, total, folder);
         });
-        long now = System.currentTimeMillis();
-        if (now - lastNotifyAt > 500 || done == total) {
-            lastNotifyAt = now;
-            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-            if (nm != null) nm.notify(NOTI_ID, buildNotification(done, total, folder));
-        }
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) nm.notify(NOTI_ID, buildNotification(done, total, folder));
     }
 
     private void finishService() {
@@ -307,9 +311,7 @@ public class OrganizeService extends Service {
     }
 
     private void startInForeground(Notification n) {
-        if (Sdk.atLeastU()) {
-            startForeground(NOTI_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        } else if (Sdk.atLeastQ()) {
+        if (Sdk.atLeastQ()) {
             startForeground(NOTI_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         } else {
             startForeground(NOTI_ID, n);

@@ -27,6 +27,8 @@ import com.shaforostoff.dcimsort.geo.GeoExtractor;
 import com.shaforostoff.dcimsort.geo.PlaceResolver;
 import com.shaforostoff.dcimsort.util.Formatter;
 import com.shaforostoff.dcimsort.util.Sdk;
+import com.shaforostoff.dcimsort.util.ThreadPlanner;
+import com.shaforostoff.dcimsort.util.SystemBars;
 import com.shaforostoff.dcimsort.work.SizeEstimator;
 import com.shaforostoff.dcimsort.work.TargetResolver;
 
@@ -36,6 +38,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Dry-run of the organize plan: groups photos into Place-YYYY-MM folders with counts and an
@@ -49,7 +55,7 @@ public class PreviewActivity extends Activity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean cancelled = false;
-    private volatile java.util.concurrent.ExecutorService geoPool;
+    private volatile ExecutorService geoPool;
 
     private ListView folderList;
     private GridView photoGrid;
@@ -86,7 +92,7 @@ public class PreviewActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_preview);
-        applySystemBarsInsets();
+        SystemBars.padContent(this);
         folderList = findViewById(R.id.folder_list);
         photoGrid = findViewById(R.id.photo_grid);
         statusGroup = findViewById(R.id.status_group);
@@ -178,29 +184,32 @@ public class PreviewActivity extends Activity {
                 // lookups are I/O/IPC-bound and independent, so a small pool overlaps them; results
                 // go into an indexed array so grouping order stays exactly newest-first.
                 final String[] names = new String[total];
-                final java.util.concurrent.atomic.AtomicInteger doneCount =
-                        new java.util.concurrent.atomic.AtomicInteger();
+                final AtomicInteger cursor = new AtomicInteger();
+                final AtomicInteger doneCount = new AtomicInteger();
                 final int step = Math.max(1, total / 100); // cap UI updates at ~100
                 int workers = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() * 2));
-                geoPool = new java.util.concurrent.ThreadPoolExecutor(
-                        workers, workers, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
-                        new java.util.concurrent.LinkedBlockingQueue<>(),
-                        com.shaforostoff.dcimsort.util.ThreadPlanner.backgroundFactory("preview-geo"));
-                for (int i = 0; i < total; i++) {
-                    final int idx = i;
-                    final MediaImage img = images.get(i);
+                geoPool = new ThreadPoolExecutor(
+                        workers, workers, 0L, TimeUnit.MILLISECONDS,
+                        new LinkedBlockingQueue<>(),
+                        ThreadPlanner.backgroundFactory("preview-geo"));
+                // Each worker claims the next index itself. Submitting one task per image would
+                // queue a runnable (and its captured photo) for every photo in the folder before
+                // any work started — tens of thousands of objects on a large library.
+                for (int w = 0; w < workers; w++) {
                     geoPool.execute(() -> {
-                        if (cancelled) return;
-                        names[idx] = targets.folderFor(img);
-                        int d = doneCount.incrementAndGet();
-                        if (d % step == 0 || d == total) {
-                            main.post(() -> updateProgress(d, total));
+                        int i;
+                        while (!cancelled && (i = cursor.getAndIncrement()) < total) {
+                            names[i] = targets.folderFor(images.get(i));
+                            final int d = doneCount.incrementAndGet();
+                            if (d % step == 0 || d == total) {
+                                main.post(() -> updateProgress(d, total));
+                            }
                         }
                     });
                 }
                 geoPool.shutdown();
                 try {
-                    geoPool.awaitTermination(10, java.util.concurrent.TimeUnit.MINUTES);
+                    geoPool.awaitTermination(10, TimeUnit.MINUTES);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     geoPool.shutdownNow();
@@ -330,20 +339,6 @@ public class PreviewActivity extends Activity {
         } else {
             super.onBackPressed();
         }
-    }
-
-    private void applySystemBarsInsets() {
-        View root = findViewById(android.R.id.content);
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            if (Sdk.atLeastR()) {
-                v.setPadding(0, insets.getInsets(WindowInsets.Type.systemBars()).top,
-                        0, insets.getInsets(WindowInsets.Type.systemBars()).bottom);
-            } else {
-                v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
-            }
-            return insets;
-        });
-        root.requestApplyInsets();
     }
 
     @Override
