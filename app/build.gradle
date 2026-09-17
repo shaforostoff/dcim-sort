@@ -79,6 +79,21 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+    packaging {
+        jniLibs {
+            // jpegli's build emits shared libraries alongside the static ones we actually use:
+            // a libjpeg-compatible libjpeg.so in every config (~208 KB), plus libjpegli_cms.so and
+            // libjpegli_threads.so in the Debug config (~822 KB more). AGP packages every .so it
+            // finds in the CMake output directory, so all of it would ship as dead weight.
+            //
+            // Safe because native-codecs.cpp links jpegli-static: libdcimsort_codecs.so carries no
+            // DT_NEEDED entry for any of these, and dcimsort_codecs is the only library the app
+            // ever loads. If the bridge is ever switched to link jpegli dynamically, this block has
+            // to go — the failure mode would be an UnsatisfiedLinkError at first encode.
+            excludes += ['**/libjpeg.so', '**/libjpegli_cms.so', '**/libjpegli_threads.so']
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
