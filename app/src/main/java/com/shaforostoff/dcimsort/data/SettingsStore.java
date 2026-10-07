@@ -3,7 +3,6 @@ package com.shaforostoff.dcimsort.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import com.shaforostoff.dcimsort.data.GroupMode;
 import com.shaforostoff.dcimsort.work.SizeEstimator;
 
 /** Persists the selected source folder and compression settings across app restarts. */
@@ -29,26 +28,23 @@ public class SettingsStore {
         prefs = ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    public boolean hasSourceFolder() {
-        return prefs.contains(K_REL_PATH) || prefs.contains(K_DATA_PATH);
+    /** The saved source folder (its photo count isn't stored), or null if none was chosen yet. */
+    public Bucket getSourceFolder() {
+        if (!prefs.contains(K_REL_PATH) && !prefs.contains(K_DATA_PATH)) return null;
+        return new Bucket(prefs.getLong(K_BUCKET_ID, -1), prefs.getString(K_DISPLAY, null),
+                prefs.getString(K_REL_PATH, null), prefs.getString(K_DATA_PATH, null), 0,
+                prefs.getString(K_VOLUME, null));
     }
 
-    public void setSourceFolder(String relativePath, long bucketId, String displayName,
-                                String dataPath, String volumeName) {
+    public void setSourceFolder(Bucket b) {
         prefs.edit()
-                .putString(K_REL_PATH, relativePath)
-                .putLong(K_BUCKET_ID, bucketId)
-                .putString(K_DISPLAY, displayName)
-                .putString(K_DATA_PATH, dataPath)
-                .putString(K_VOLUME, volumeName)
+                .putString(K_REL_PATH, b.relativePath)
+                .putLong(K_BUCKET_ID, b.id)
+                .putString(K_DISPLAY, b.displayName)
+                .putString(K_DATA_PATH, b.dataDir)
+                .putString(K_VOLUME, b.volumeName)
                 .apply();
     }
-
-    public String getRelativePath() { return prefs.getString(K_REL_PATH, null); }
-    public long getBucketId() { return prefs.getLong(K_BUCKET_ID, -1); }
-    public String getDisplayName() { return prefs.getString(K_DISPLAY, null); }
-    public String getDataPath() { return prefs.getString(K_DATA_PATH, null); }
-    public String getVolumeName() { return prefs.getString(K_VOLUME, null); }
 
     public CompressMode getMode() {
         return CompressMode.fromName(prefs.getString(K_MODE, CompressMode.NONE.name()), CompressMode.NONE);

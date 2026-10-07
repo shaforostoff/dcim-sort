@@ -4,10 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
 import android.app.PendingIntent;
-import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.IntentSender;
-import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,7 +13,6 @@ import android.os.Looper;
 import android.widget.ScrollView;
 import android.provider.MediaStore;
 import android.view.View;
-import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
@@ -43,16 +40,13 @@ import com.shaforostoff.dcimsort.work.OrganizeService;
 import com.shaforostoff.dcimsort.work.Recompressor;
 import com.shaforostoff.dcimsort.work.SizeEstimator;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,28 +59,22 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     private static final int REQ_PICK_FILES = 13;
     private static final int CONSENT_CHUNK = 480;
 
-    private static final int CONSENT_WRITE = 0;
-
     private SettingsStore settings;
     private MediaRepository repo;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    // Views
+    // Views. Radio buttons carry their CompressMode/GroupMode name as android:tag.
     private TextView txtFolder, txtQuality, txtProgress, txtPlan;
-    private RadioGroup radioMode;
-    private RadioButton radioNone, radioWebp, radioHeic, radioAvif, radioJpeg;
-    private RadioGroup radioGroupMode;
-    private RadioButton radioGroupNone, radioGroupPlaceMonth, radioGroupPlaceDay;
+    private RadioGroup radioMode, radioGroupMode;
     private LinearLayout qualityGroup, progressGroup, dateRangeGroup;
     private SeekBar seekQuality;
     private CheckBox checkSkipFav, checkSkipLowGain, checkKeepOriginal;
     private Button btnPreview, btnOrganize, btnStop, btnBrowse, btnFiles, btnDateFrom, btnDateTo, btnInfo;
     private ProgressBar progressBar;
 
-    // Current folder
-    private String relPath, dataDir, displayName, volumeName;
-    private long bucketId = -1;
+    // Current source folder; null when none is selected or in files mode.
+    private Bucket folder;
 
     // Files mode: images picked individually via the system photo picker (no source folder).
     private boolean filesMode;
@@ -96,7 +84,6 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // when any selected photo has no on-device MediaStore row (e.g. Google Photos cloud pick).
     private boolean userKeepOriginal;
     private boolean keepOriginalForced;
-    private boolean pendingKeepOriginal;
 
     // Cached folder contents (newest-first) + date-range scoping
     private List<MediaImage> allImages;
@@ -108,23 +95,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // clearEstimateCache() drops it whenever the folder, picked files, or date range changes.
     private final Map<String, Double> ratioCache = new ConcurrentHashMap<>();
 
-    // Pending organize job + consent queue
-    private List<MediaImage> pendingImages;
-    private CompressMode pendingMode;
-    private GroupMode pendingGroupMode;
-    private int pendingQuality;
-    private boolean pendingSkipFav;
-    private boolean pendingSkipLowGain;
-    private int pendingMinGain;
-    private String pendingRel, pendingDir;
-    private List<ConsentStep> consentQueue;
+    // Organize job waiting on MediaStore write consent, requested one chunk of URIs at a time.
+    private OrganizeRequest pendingRequest;
+    private List<List<Uri>> consentQueue;
     private int consentIndex;
-
-    private static final class ConsentStep {
-        final int type;
-        final List<Uri> uris;
-        ConsentStep(int type, List<Uri> uris) { this.type = type; this.uris = uris; }
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -152,11 +126,6 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         btnFiles = findViewById(R.id.btn_files);
         txtFolder = findViewById(R.id.txt_folder);
         radioMode = findViewById(R.id.radio_compressmode);
-        radioNone = findViewById(R.id.radio_compressnone);
-        radioWebp = findViewById(R.id.radio_compresswebp);
-        radioHeic = findViewById(R.id.radio_compressheic);
-        radioAvif = findViewById(R.id.radio_compressavif);
-        radioJpeg = findViewById(R.id.radio_compressjpeg);
         qualityGroup = findViewById(R.id.quality_group);
         txtQuality = findViewById(R.id.txt_quality);
         seekQuality = findViewById(R.id.seek_quality);
@@ -164,9 +133,6 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         checkSkipLowGain = findViewById(R.id.check_skip_low_gain);
         checkKeepOriginal = findViewById(R.id.check_keep_original);
         radioGroupMode = findViewById(R.id.radio_groupmode);
-        radioGroupNone = findViewById(R.id.radio_groupnone);
-        radioGroupPlaceMonth = findViewById(R.id.radio_groupplacemonth);
-        radioGroupPlaceDay = findViewById(R.id.radio_groupplaceday);
         dateRangeGroup = findViewById(R.id.date_range_group);
         btnDateFrom = findViewById(R.id.btn_date_from);
         btnDateTo = findViewById(R.id.btn_date_to);
@@ -197,36 +163,16 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             startPickFiles();
         });
 
-        // HEIC only when the device can encode it.
-        if (!Recompressor.canEncode(CompressMode.HEIC)) {
-            radioHeic.setVisibility(View.GONE);
-        }
-        // AVIF: Android 16+ platform encoder, or the full flavor's bundled libavif on any version.
-        if (!Recompressor.canEncode(CompressMode.AVIF)) {
-            radioAvif.setVisibility(View.GONE);
-        }
-        // JPEG only in the full flavor (jpegli is bundled there).
-        if (!Recompressor.canEncode(CompressMode.JPEG)) {
-            radioJpeg.setVisibility(View.GONE);
-        }
-        // Favorites skip only on Android 11+.
-        if (!Sdk.atLeastR()) {
-            checkSkipFav.setVisibility(View.GONE);
+        // Hide formats this device/flavor can't encode (HEIC needs an HEVC encoder, AVIF libavif or
+        // Android 16+, JPEG the full flavor's jpegli).
+        for (CompressMode m : CompressMode.values()) {
+            if (!Recompressor.canEncode(m)) radioMode.findViewWithTag(m.name()).setVisibility(View.GONE);
         }
 
         radioMode.setOnCheckedChangeListener((group, checkedId) -> {
             CompressMode mode = currentMode();
             settings.setMode(mode);
-            qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
-            if (Sdk.atLeastR()) {
-                checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
-            }
-            checkSkipLowGain.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
-            if (mode.recompresses()) {
-                int q = settings.getQuality(mode);
-                seekQuality.setProgress(q);
-                txtQuality.setText(getString(R.string.quality_label, q));
-            }
+            applyModeUi(mode);
             recomputeSummary();
         });
 
@@ -278,6 +224,18 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         updateDateLabels();
     }
 
+    /** Shows the controls that only matter when recompressing, and loads that format's quality. */
+    private void applyModeUi(CompressMode mode) {
+        int visibility = mode.recompresses() ? View.VISIBLE : View.GONE;
+        qualityGroup.setVisibility(visibility);
+        checkSkipLowGain.setVisibility(visibility);
+        // Favorites skip only on Android 11+.
+        checkSkipFav.setVisibility(Sdk.atLeastR() ? visibility : View.GONE);
+        int q = settings.getQuality(mode);
+        seekQuality.setProgress(q);
+        txtQuality.setText(getString(R.string.quality_label, q));
+    }
+
     /**
      * Overlay behind the skip-low-gain checkbox (long-press): picks the minimum saving, 1–99%, below
      * which compressing isn't worth it. Applied on OK so dragging the bar doesn't re-run estimates.
@@ -321,16 +279,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
     private void showInfoDialog() {
         String text;
-        try (InputStream is = getResources().openRawResource(R.raw.help_text);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append('\n');
-            }
-            text = sb.toString();
-        } catch (IOException e) {
-            text = "";
+        try (Scanner s = new Scanner(getResources().openRawResource(R.raw.help_text), "UTF-8")) {
+            text = s.useDelimiter("\\A").hasNext() ? s.next() : "";
         }
 
         int padding = (int) (16 * getResources().getDisplayMetrics().density);
@@ -350,38 +300,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
     private void applySavedSettings() {
         CompressMode mode = settings.getMode();
-        if (mode == CompressMode.HEIC && !Recompressor.canEncode(CompressMode.HEIC)) {
-            mode = CompressMode.NONE;
-        }
-        if (mode == CompressMode.AVIF && !Recompressor.canEncode(CompressMode.AVIF)) {
-            mode = CompressMode.NONE;
-        }
-        if (mode == CompressMode.JPEG && !Recompressor.canEncode(CompressMode.JPEG)) {
-            mode = CompressMode.NONE;
-        }
-        switch (mode) {
-            case WEBP: radioWebp.setChecked(true); break;
-            case HEIC: radioHeic.setChecked(true); break;
-            case AVIF: radioAvif.setChecked(true); break;
-            case JPEG: radioJpeg.setChecked(true); break;
-            default: radioNone.setChecked(true); break;
-        }
-        qualityGroup.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
-        if (Sdk.atLeastR()) {
-            checkSkipFav.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
-        }
-        checkSkipLowGain.setVisibility(mode.recompresses() ? View.VISIBLE : View.GONE);
-        int q = settings.getQuality(mode);
-        seekQuality.setProgress(q);
-        txtQuality.setText(getString(R.string.quality_label, q));
+        if (!Recompressor.canEncode(mode)) mode = CompressMode.NONE;
+        ((RadioButton) radioMode.findViewWithTag(mode.name())).setChecked(true);
+        applyModeUi(mode);
         checkSkipFav.setChecked(settings.getSkipFavorites());
         checkSkipLowGain.setChecked(settings.getSkipLowGain());
         updateSkipLowGainLabel();
-        switch (settings.getGroupMode()) {
-            case NONE: radioGroupNone.setChecked(true); break;
-            case PLACE_DAY: radioGroupPlaceDay.setChecked(true); break;
-            default: radioGroupPlaceMonth.setChecked(true); break;
-        }
+        ((RadioButton) radioGroupMode.findViewWithTag(settings.getGroupMode().name())).setChecked(true);
         updateOrganizeButtonLabel();
     }
 
@@ -392,30 +317,28 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     }
 
     private GroupMode currentGroupMode() {
-        int id = radioGroupMode.getCheckedRadioButtonId();
-        if (id == R.id.radio_groupnone) return GroupMode.NONE;
-        if (id == R.id.radio_groupplaceday) return GroupMode.PLACE_DAY;
-        return GroupMode.PLACE_MONTH;
+        return GroupMode.fromName(checkedTag(radioGroupMode), GroupMode.PLACE_MONTH);
     }
 
     private CompressMode currentMode() {
-        int id = radioMode.getCheckedRadioButtonId();
-        if (id == R.id.radio_compresswebp) return CompressMode.WEBP;
-        if (id == R.id.radio_compressheic) return CompressMode.HEIC;
-        if (id == R.id.radio_compressavif) return CompressMode.AVIF;
-        if (id == R.id.radio_compressjpeg) return CompressMode.JPEG;
-        return CompressMode.NONE;
+        return CompressMode.fromName(checkedTag(radioMode), CompressMode.NONE);
+    }
+
+    private static String checkedTag(RadioGroup group) {
+        View checked = group.findViewById(group.getCheckedRadioButtonId());
+        return checked != null ? (String) checked.getTag() : null;
+    }
+
+    private boolean skipFav() {
+        return checkSkipFav.isChecked() && Sdk.atLeastR();
     }
 
     // ---- Folder + stats -----------------------------------------------------
 
     private void initFolder() {
-        if (settings.hasSourceFolder()) {
-            relPath = settings.getRelativePath();
-            dataDir = settings.getDataPath();
-            displayName = settings.getDisplayName();
-            bucketId = settings.getBucketId();
-            volumeName = settings.getVolumeName();
+        Bucket saved = settings.getSourceFolder();
+        if (saved != null) {
+            folder = saved;
             applyFolder();
         } else {
             txtPlan.setText(R.string.counting);
@@ -423,7 +346,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 final Bucket b = repo.findDefaultCameraBucket();
                 main.post(() -> {
                     if (b != null) {
-                        setFolder(b.relativePath, b.dataDir, b.displayName, b.id, b.volumeName);
+                        setFolder(b);
                     } else {
                         txtFolder.setText(R.string.no_folder_selected);
                         txtPlan.setText(R.string.no_photos);
@@ -433,13 +356,9 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         }
     }
 
-    private void setFolder(String rel, String dir, String display, long id, String vol) {
-        relPath = rel;
-        dataDir = dir;
-        displayName = display;
-        bucketId = id;
-        volumeName = vol;
-        settings.setSourceFolder(rel, id, display, dir, vol);
+    private void setFolder(Bucket b) {
+        folder = b;
+        settings.setSourceFolder(b);
         applyFolder();
     }
 
@@ -449,25 +368,20 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         keepOriginalForced = false; // folder images are always movable in place
         applyKeepOriginalState();
         dateRangeGroup.setVisibility(View.VISIBLE);
-        txtFolder.setText(displayName != null ? displayName
-                : (relPath != null ? relPath : getString(R.string.no_folder_selected)));
+        txtFolder.setText(folder.displayName != null ? folder.displayName
+                : (folder.relativePath != null ? folder.relativePath : getString(R.string.no_folder_selected)));
         loadFolder();
     }
 
     /** Reflects keep-original state: locked-on when forced, else the user's own choice. */
     private void applyKeepOriginalState() {
-        if (keepOriginalForced) {
-            checkKeepOriginal.setChecked(true);
-            checkKeepOriginal.setEnabled(false);
-        } else {
-            checkKeepOriginal.setEnabled(true);
-            checkKeepOriginal.setChecked(userKeepOriginal);
-        }
+        checkKeepOriginal.setEnabled(!keepOriginalForced);
+        checkKeepOriginal.setChecked(keepOriginalForced || userKeepOriginal);
     }
 
     /** Gathers the folder's images once, then derives stats, the date span, and the plan summary. */
     private void loadFolder() {
-        if (relPath == null && dataDir == null) {
+        if (folder == null) {
             txtPlan.setText("");
             return;
         }
@@ -475,10 +389,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         clearEstimateCache();
         txtPlan.setText(R.string.counting);
         setRangeControlsEnabled(false);
-        final String rel = relPath, dir = dataDir, vol = volumeName;
+        final Bucket f = folder;
         executor.execute(() -> {
             final List<MediaImage> imgs = new ArrayList<>();
-            repo.forEachNewestFirst(rel, dir, vol, img -> {
+            repo.forEachNewestFirst(f.relativePath, f.dataDir, f.volumeName, img -> {
                 imgs.add(img);
                 return true;
             });
@@ -492,12 +406,12 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             final long fMin = (min == Long.MAX_VALUE) ? 0 : min;
             final long fMax = (max == Long.MIN_VALUE) ? 0 : max;
             main.post(() -> {
-                if (!sameFolder(rel, dir)) return;
+                if (f != folder) return; // folder changed meanwhile
                 allImages = imgs;
                 folderMinDate = fMin;
                 folderMaxDate = fMax;
-                rangeFrom = fMin > 0 ? startOfDay(fMin) : Long.MIN_VALUE;
-                rangeTo = fMax > 0 ? endOfDay(fMax) : Long.MAX_VALUE;
+                rangeFrom = fMin > 0 ? dayBound(fMin, false) : Long.MIN_VALUE;
+                rangeTo = fMax > 0 ? dayBound(fMax, true) : Long.MAX_VALUE;
                 updateDateLabels();
                 setRangeControlsEnabled(fMin > 0);
                 recomputeSummary();
@@ -526,7 +440,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
     private void loadPickedFiles(List<Uri> uris) {
         if (uris.isEmpty()) return;
-        relPath = null; dataDir = null; displayName = null; volumeName = null; bucketId = -1;
+        folder = null;
         allImages = null;
         clearEstimateCache();
         filesMode = true;
@@ -539,9 +453,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         rangeFrom = Long.MIN_VALUE;
         rangeTo = Long.MAX_VALUE;
         txtPlan.setText(R.string.counting);
-        final List<Uri> fUris = uris;
         executor.execute(() -> {
-            final List<MediaImage> imgs = repo.fetchByUris(fUris);
+            final List<MediaImage> imgs = repo.fetchByUris(uris);
             boolean anyCloud = false;
             for (MediaImage m : imgs) if (!m.isMovable()) { anyCloud = true; break; }
             final boolean forced = anyCloud;
@@ -557,14 +470,6 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         });
     }
 
-    private boolean sameFolder(String rel, String dir) {
-        return eq(rel, relPath) && eq(dir, dataDir);
-    }
-
-    private static boolean eq(String a, String b) {
-        return a == null ? b == null : a.equals(b);
-    }
-
     // ---- Date range ---------------------------------------------------------
 
     private void setRangeControlsEnabled(boolean enabled) {
@@ -573,36 +478,23 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     }
 
     private void updateDateLabels() {
-        if (folderMinDate <= 0) {
-            btnDateFrom.setText(getString(R.string.date_from_label, "—"));
-            btnDateTo.setText(getString(R.string.date_to_label, "—"));
-            return;
-        }
-        btnDateFrom.setText(getString(R.string.date_from_label, formatDay(rangeFrom)));
-        btnDateTo.setText(getString(R.string.date_to_label, formatDay(rangeTo)));
+        boolean dated = folderMinDate > 0;
+        btnDateFrom.setText(getString(R.string.date_from_label, dated ? formatDay(rangeFrom) : "—"));
+        btnDateTo.setText(getString(R.string.date_to_label, dated ? formatDay(rangeTo) : "—"));
     }
 
     private static String formatDay(long millis) {
         return DateFormat.getDateInstance(DateFormat.MEDIUM).format(new Date(millis));
     }
 
-    private static long startOfDay(long millis) {
+    /** First (or, with {@code end}, last) millisecond of the local day containing {@code millis}. */
+    private static long dayBound(long millis, boolean end) {
         Calendar c = Calendar.getInstance();
         c.setTimeInMillis(millis);
-        c.set(Calendar.HOUR_OF_DAY, 0);
-        c.set(Calendar.MINUTE, 0);
-        c.set(Calendar.SECOND, 0);
-        c.set(Calendar.MILLISECOND, 0);
-        return c.getTimeInMillis();
-    }
-
-    private static long endOfDay(long millis) {
-        Calendar c = Calendar.getInstance();
-        c.setTimeInMillis(millis);
-        c.set(Calendar.HOUR_OF_DAY, 23);
-        c.set(Calendar.MINUTE, 59);
-        c.set(Calendar.SECOND, 59);
-        c.set(Calendar.MILLISECOND, 999);
+        c.set(Calendar.HOUR_OF_DAY, end ? 23 : 0);
+        c.set(Calendar.MINUTE, end ? 59 : 0);
+        c.set(Calendar.SECOND, end ? 59 : 0);
+        c.set(Calendar.MILLISECOND, end ? 999 : 0);
         return c.getTimeInMillis();
     }
 
@@ -616,33 +508,25 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         DatePickerDialog dlg = new DatePickerDialog(this, (view, year, month, day) -> {
             Calendar picked = Calendar.getInstance();
             picked.set(year, month, day, 12, 0, 0);
-            long val = picked.getTimeInMillis();
-            if (isFrom) {
-                rangeFrom = startOfDay(val);
-                if (rangeTo < rangeFrom) rangeTo = endOfDay(val);
-            } else {
-                rangeTo = endOfDay(val);
-                if (rangeFrom > rangeTo) rangeFrom = startOfDay(val);
-            }
-            clearEstimateCache(); // date range changed → previously sampled set no longer applies
-            updateDateLabels();
-            recomputeSummary();
+            setRangeDay(isFrom, picked.getTimeInMillis());
         }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH));
         dlg.setButton(android.content.DialogInterface.BUTTON_NEUTRAL, getString(R.string.today),
-                (dialog, which) -> {
-                    long now = System.currentTimeMillis();
-                    if (isFrom) {
-                        rangeFrom = startOfDay(now);
-                        if (rangeTo < rangeFrom) rangeTo = endOfDay(now);
-                    } else {
-                        rangeTo = endOfDay(now);
-                        if (rangeFrom > rangeTo) rangeFrom = startOfDay(now);
-                    }
-                    clearEstimateCache(); // date range changed → previously sampled set no longer applies
-                    updateDateLabels();
-                    recomputeSummary();
-                });
+                (dialog, which) -> setRangeDay(isFrom, System.currentTimeMillis()));
         dlg.show();
+    }
+
+    /** Moves one end of the date range to the day containing {@code millis}, keeping from ≤ to. */
+    private void setRangeDay(boolean isFrom, long millis) {
+        if (isFrom) {
+            rangeFrom = dayBound(millis, false);
+            if (rangeTo < rangeFrom) rangeTo = dayBound(millis, true);
+        } else {
+            rangeTo = dayBound(millis, true);
+            if (rangeFrom > rangeTo) rangeFrom = dayBound(millis, false);
+        }
+        clearEstimateCache(); // date range changed → previously sampled set no longer applies
+        updateDateLabels();
+        recomputeSummary();
     }
 
     private List<MediaImage> imagesInRange() {
@@ -672,20 +556,14 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         final int count = inRange.size();
         final CompressMode mode = currentMode();
         final int quality = seekQuality.getProgress();
-        final boolean skipFav = checkSkipFav.isChecked() && Sdk.atLeastR();
+        final boolean skipFav = skipFav();
         final boolean skipLowGain = checkSkipLowGain.isChecked();
         final int minGain = settings.getMinGainPercent();
         final int gen = ++summaryGen;
 
-        if (count == 0) {
-            txtPlan.setText(getString(R.string.plan_summary_exact, 0,
-                    Formatter.humanReadableBytes(0)));
-            return;
-        }
         long originalTotal = 0;
         for (MediaImage m : inRange) originalTotal += m.size;
-
-        if (!mode.recompresses()) {
+        if (count == 0 || !mode.recompresses()) {
             txtPlan.setText(getString(R.string.plan_summary_exact, count,
                     Formatter.humanReadableBytes(originalTotal)));
             return;
@@ -726,44 +604,35 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // ---- Preview ------------------------------------------------------------
 
     private void openPreview() {
-        if (relPath == null && dataDir == null && !filesMode) {
+        if (folder == null && !filesMode) {
             toast(R.string.select_folder_first);
             return;
         }
         Intent i = new Intent(this, PreviewActivity.class);
-        putFolderExtras(i);
-        i.putExtra(Extras.RATIO, lastEstimateRatio); // 0 if not yet calibrated → Preview uses its default
-        startActivity(i);
-    }
-
-    private void putFolderExtras(Intent i) {
-        i.putExtra(Extras.REL_PATH, relPath);
-        i.putExtra(Extras.DATA_DIR, dataDir);
-        i.putExtra(Extras.VOLUME_NAME, volumeName);
+        if (folder != null) {
+            i.putExtra(Extras.REL_PATH, folder.relativePath);
+            i.putExtra(Extras.DATA_DIR, folder.dataDir);
+            i.putExtra(Extras.VOLUME_NAME, folder.volumeName);
+        }
         if (filesMode) i.putStringArrayListExtra(Extras.FILE_URIS, pickedUris);
-        i.putExtra(Extras.DISPLAY, displayName);
         i.putExtra(Extras.MODE, currentMode().name());
         i.putExtra(Extras.GROUP_MODE, currentGroupMode().name());
         i.putExtra(Extras.QUALITY, seekQuality.getProgress());
-        i.putExtra(Extras.SKIP_FAV, checkSkipFav.isChecked() && Sdk.atLeastR());
+        i.putExtra(Extras.SKIP_FAV, skipFav());
         i.putExtra(Extras.SKIP_LOW_GAIN, checkSkipLowGain.isChecked());
         i.putExtra(Extras.MIN_GAIN_PERCENT, settings.getMinGainPercent());
         i.putExtra(Extras.DATE_FROM, rangeFrom);
         i.putExtra(Extras.DATE_TO, rangeTo);
+        i.putExtra(Extras.RATIO, lastEstimateRatio); // 0 if not yet calibrated → Preview uses its default
+        startActivity(i);
     }
 
     // ---- Organize -----------------------------------------------------------
 
     private void startOrganize() {
-        if (relPath == null && dataDir == null && allImages == null) {
-            toast(R.string.select_folder_first);
-            return;
-        }
-        if (OrganizeService.RUNNING) {
-            return;
-        }
+        if (OrganizeService.RUNNING) return;
         if (allImages == null) {
-            toast(R.string.counting);
+            toast(folder == null && !filesMode ? R.string.select_folder_first : R.string.counting);
             return;
         }
         // Reuse the cached folder listing, scoped to the selected date range and preview selection.
@@ -773,70 +642,49 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
             return;
         }
         setBusy(true);
-        onImagesGathered(imgs, currentMode(), currentGroupMode(), seekQuality.getProgress(),
-                checkSkipFav.isChecked() && Sdk.atLeastR(), checkSkipLowGain.isChecked(),
-                settings.getMinGainPercent(), relPath, dataDir);
-    }
-
-    private void onImagesGathered(List<MediaImage> imgs, CompressMode mode, GroupMode groupMode,
-                                  int quality, boolean skipFav, boolean skipLowGain,
-                                  int minGainPercent, String rel, String dir) {
-        if (imgs.isEmpty()) {
-            setBusy(false);
-            toast(R.string.no_photos);
-            return;
+        OrganizeRequest req = new OrganizeRequest();
+        req.images = imgs;
+        req.mode = currentMode();
+        req.groupMode = currentGroupMode();
+        req.quality = seekQuality.getProgress();
+        req.skipFavorites = skipFav();
+        req.skipLowGain = checkSkipLowGain.isChecked();
+        req.minGainPercent = settings.getMinGainPercent();
+        req.keepOriginal = checkKeepOriginal.isChecked();
+        if (folder != null) {
+            req.sourceRelativePath = folder.relativePath;
+            req.sourceDataDir = folder.dataDir;
+            req.volumeName = folder.volumeName;
         }
-        pendingImages = imgs;
-        pendingMode = mode;
-        pendingGroupMode = groupMode;
-        pendingQuality = quality;
-        pendingSkipFav = skipFav;
-        pendingSkipLowGain = skipLowGain;
-        pendingMinGain = minGainPercent;
-        pendingRel = rel;
-        pendingDir = dir;
-        pendingKeepOriginal = checkKeepOriginal.isChecked();
+        pendingRequest = req;
 
-        // Copy mode (keep original) only inserts new files we own, so no consent on originals.
-        if (Sdk.atLeastR() && !pendingKeepOriginal) {
-            buildConsentQueue(imgs);
-            consentIndex = 0;
-            processNextConsent();
-        } else {
-            launchService();
-        }
-    }
-
-    private void buildConsentQueue(List<MediaImage> imgs) {
         consentQueue = new ArrayList<>();
-        // Both moving (RELATIVE_PATH update) and recompressing (write a replacement, then delete the
-        // original) need WRITE access to each original. We must NOT use createDeleteRequest here: it
-        // deletes the originals the instant the user approves — before any replacement is written —
-        // so any later failure loses the photo with nothing to show for it. Mover deletes each
-        // original itself, only after its recompressed replacement has been written and verified.
-        List<Uri> writeUris = new ArrayList<>();
-        for (MediaImage m : imgs) if (m.isMovable()) writeUris.add(m.contentUri());
-        addChunks(CONSENT_WRITE, writeUris);
-    }
-
-    private void addChunks(int type, List<Uri> uris) {
-        for (int i = 0; i < uris.size(); i += CONSENT_CHUNK) {
-            consentQueue.add(new ConsentStep(type,
-                    new ArrayList<>(uris.subList(i, Math.min(i + CONSENT_CHUNK, uris.size())))));
+        consentIndex = 0;
+        // Copy mode (keep original) only inserts new files we own, so no consent on originals.
+        if (Sdk.atLeastR() && !req.keepOriginal) {
+            // Both moving (RELATIVE_PATH update) and recompressing (write a replacement, then delete
+            // the original) need WRITE access to each original. We must NOT use createDeleteRequest
+            // here: it deletes the originals the instant the user approves — before any replacement
+            // is written — so any later failure loses the photo with nothing to show for it. Mover
+            // deletes each original itself, only after its replacement has been written and verified.
+            List<Uri> uris = new ArrayList<>();
+            for (MediaImage m : imgs) if (m.isMovable()) uris.add(m.contentUri());
+            for (int i = 0; i < uris.size(); i += CONSENT_CHUNK) {
+                consentQueue.add(new ArrayList<>(uris.subList(i, Math.min(i + CONSENT_CHUNK, uris.size()))));
+            }
         }
+        processNextConsent();
     }
 
     private void processNextConsent() {
-        if (consentQueue == null || consentIndex >= consentQueue.size()) {
+        if (consentIndex >= consentQueue.size()) {
             launchService();
             return;
         }
-        ConsentStep step = consentQueue.get(consentIndex);
-        ContentResolver resolver = getContentResolver();
-        PendingIntent pi;
         try {
             // Always a write grant — never createDeleteRequest, which would delete up front.
-            pi = MediaStore.createWriteRequest(resolver, step.uris);
+            PendingIntent pi = MediaStore.createWriteRequest(
+                    getContentResolver(), consentQueue.get(consentIndex));
             startIntentSenderForResult(pi.getIntentSender(), REQ_CONSENT, null, 0, 0, 0);
         } catch (IntentSender.SendIntentException | RuntimeException e) {
             setBusy(false);
@@ -845,24 +693,11 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     }
 
     private void launchService() {
-        OrganizeRequest req = new OrganizeRequest();
-        req.images = pendingImages;
-        req.mode = pendingMode;
-        req.groupMode = pendingGroupMode;
-        req.quality = pendingQuality;
-        req.skipFavorites = pendingSkipFav;
-        req.skipLowGain = pendingSkipLowGain;
-        req.minGainPercent = pendingMinGain;
-        req.keepOriginal = pendingKeepOriginal;
-        req.sourceRelativePath = pendingRel;
-        req.sourceDataDir = pendingDir;
-        req.volumeName = volumeName;
-        OrganizeRequest.set(req);
-
+        OrganizeRequest.set(pendingRequest);
         progressGroup.setVisibility(View.VISIBLE);
         btnStop.setVisibility(View.VISIBLE);
         progressBar.setProgress(0);
-        txtProgress.setText(getString(R.string.organizing_progress, 0, pendingImages.size(), ""));
+        txtProgress.setText(getString(R.string.organizing_progress, 0, pendingRequest.images.size(), ""));
         OrganizeService.start(this);
     }
 
@@ -915,7 +750,7 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         progressBar.setProgress(100);
         btnStop.setVisibility(View.GONE);
         SelectionStore.clear();
-        pendingImages = null;
+        pendingRequest = null;
         consentQueue = null;
         loadFolder();
     }
@@ -927,12 +762,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_PICK_FOLDER) {
             if (resultCode == RESULT_OK && data != null) {
-                setFolder(
+                setFolder(new Bucket(
+                        data.getLongExtra(Extras.RESULT_BUCKET_ID, -1),
+                        data.getStringExtra(Extras.RESULT_DISPLAY),
                         data.getStringExtra(Extras.RESULT_REL_PATH),
                         data.getStringExtra(Extras.RESULT_DATA_DIR),
-                        data.getStringExtra(Extras.RESULT_DISPLAY),
-                        data.getLongExtra(Extras.RESULT_BUCKET_ID, -1),
-                        data.getStringExtra(Extras.VOLUME_NAME));
+                        0,
+                        data.getStringExtra(Extras.VOLUME_NAME)));
             }
         } else if (requestCode == REQ_PICK_FILES) {
             if (resultCode == RESULT_OK && data != null) {
@@ -943,15 +779,16 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
                 } else if (data.getData() != null) {
                     uris.add(data.getData());
                 }
-                if (!uris.isEmpty()) loadPickedFiles(uris);
+                loadPickedFiles(uris);
             }
         } else if (requestCode == REQ_CONSENT) {
-            if (resultCode == RESULT_OK) {
+            // pendingRequest is gone if the activity was recreated while the consent dialog showed.
+            if (resultCode == RESULT_OK && pendingRequest != null) {
                 consentIndex++;
                 processNextConsent();
             } else {
                 setBusy(false);
-                pendingImages = null;
+                pendingRequest = null;
                 consentQueue = null;
                 toast(R.string.organize_stopped);
             }

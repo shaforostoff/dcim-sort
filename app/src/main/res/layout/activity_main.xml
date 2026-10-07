@@ -61,6 +61,7 @@
 
             <RadioButton
                 android:id="@+id/radio_compressnone"
+                android:tag="NONE"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="true"
@@ -68,24 +69,28 @@
 
             <RadioButton
                 android:id="@+id/radio_compresswebp"
+                android:tag="WEBP"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/compressmode_webp" />
 
             <RadioButton
                 android:id="@+id/radio_compressheic"
+                android:tag="HEIC"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/compressmode_heic" />
 
             <RadioButton
                 android:id="@+id/radio_compressavif"
+                android:tag="AVIF"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/compressmode_avif" />
 
             <RadioButton
                 android:id="@+id/radio_compressjpeg"
+                android:tag="JPEG"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/compressmode_jpeg" />
@@ -153,12 +158,14 @@
 
             <RadioButton
                 android:id="@+id/radio_groupnone"
+                android:tag="NONE"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/groupmode_none" />
 
             <RadioButton
                 android:id="@+id/radio_groupplacemonth"
+                android:tag="PLACE_MONTH"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="true"
@@ -166,6 +173,7 @@
 
             <RadioButton
                 android:id="@+id/radio_groupplaceday"
+                android:tag="PLACE_DAY"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/groupmode_placeday" />
