@@ -6,7 +6,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
-import android.view.WindowInsets;
 import android.widget.ArrayAdapter;
 import android.widget.BaseAdapter;
 import android.widget.Button;
@@ -21,12 +20,7 @@ import com.shaforostoff.dcimsort.data.DateRange;
 import com.shaforostoff.dcimsort.data.GroupMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
-import com.shaforostoff.dcimsort.geo.CoordCache;
-import com.shaforostoff.dcimsort.geo.GeoCache;
-import com.shaforostoff.dcimsort.geo.GeoExtractor;
-import com.shaforostoff.dcimsort.geo.PlaceResolver;
 import com.shaforostoff.dcimsort.util.Formatter;
-import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.util.ThreadPlanner;
 import com.shaforostoff.dcimsort.util.SystemBars;
 import com.shaforostoff.dcimsort.work.SizeEstimator;
@@ -38,8 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -83,7 +75,6 @@ public class PreviewActivity extends Activity {
     private static final class PlanFolder {
         final String name;
         final List<MediaImage> images = new ArrayList<>();
-        long currentBytes = 0;
         long estBytes = -1;
         PlanFolder(String name) { this.name = name; }
     }
@@ -152,10 +143,7 @@ public class PreviewActivity extends Activity {
         photoGrid.setVisibility(View.GONE);
 
         final MediaRepository repo = new MediaRepository(this);
-        final GeoCache cache = new GeoCache(this);
-        final CoordCache coordCache = new CoordCache(this);
-        final TargetResolver targets = new TargetResolver(
-                new GeoExtractor(repo), new PlaceResolver(this, cache), groupMode, coordCache);
+        final TargetResolver targets = new TargetResolver(this, repo, groupMode);
 
         executor.execute(() -> {
             try {
@@ -188,10 +176,8 @@ public class PreviewActivity extends Activity {
                 final AtomicInteger doneCount = new AtomicInteger();
                 final int step = Math.max(1, total / 100); // cap UI updates at ~100
                 int workers = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() * 2));
-                geoPool = new ThreadPoolExecutor(
-                        workers, workers, 0L, TimeUnit.MILLISECONDS,
-                        new LinkedBlockingQueue<>(),
-                        ThreadPlanner.backgroundFactory("preview-geo"));
+                geoPool = Executors.newFixedThreadPool(
+                        workers, ThreadPlanner.backgroundFactory("preview-geo"));
                 // Each worker claims the next index itself. Submitting one task per image would
                 // queue a runnable (and its captured photo) for every photo in the folder before
                 // any work started — tens of thousands of objects on a large library.
@@ -219,27 +205,23 @@ public class PreviewActivity extends Activity {
                 // Phase 3: group serially in original order using the resolved names.
                 final Map<String, PlanFolder> map = new LinkedHashMap<>();
                 for (int i = 0; i < total; i++) {
-                    MediaImage img = images.get(i);
-                    PlanFolder pf = map.get(names[i]);
-                    if (pf == null) {
-                        pf = new PlanFolder(names[i]);
-                        map.put(names[i], pf);
-                    }
-                    pf.images.add(img);
-                    pf.currentBytes += img.size;
+                    map.computeIfAbsent(names[i], PlanFolder::new).images.add(images.get(i));
                 }
 
+                // Sizes reuse the ratio the main screen already calibrated; no re-encoding here.
                 final List<PlanFolder> list = new ArrayList<>(map.values());
-                estimate(list);
-                if (cancelled) return;
+                double ratio = estimateRatio > 0 ? estimateRatio : mode.defaultBytesPerMp;
+                for (PlanFolder pf : list) {
+                    pf.estBytes = SizeEstimator.estimateWithRatio(
+                            pf.images, ratio, mode, skipFav, skipLowGain, minGainPercent);
+                }
                 main.post(() -> showFolders(list));
             } finally {
                 // Persist whatever was resolved on EVERY exit path — including Back mid-flight —
                 // so partial cold-cache work (resolved places + per-image GPS) survives and the
                 // next Preview reuses it instead of starting cold again.
                 if (geoPool != null) geoPool.shutdownNow();
-                cache.flush();
-                coordCache.flush();
+                targets.flush();
             }
         });
     }
@@ -255,19 +237,6 @@ public class PreviewActivity extends Activity {
     private void updateProgress(int done, int total) {
         progress.setProgress(done);
         status.setText(getString(R.string.estimating_progress, done, total));
-    }
-
-    private void estimate(List<PlanFolder> list) {
-        if (!mode.recompresses()) {
-            for (PlanFolder pf : list) pf.estBytes = pf.currentBytes;
-            return;
-        }
-        // Reuse the ratio the main screen already calibrated; no re-encoding here.
-        double ratio = estimateRatio > 0 ? estimateRatio : mode.defaultBytesPerMp;
-        for (PlanFolder pf : list) {
-            pf.estBytes = SizeEstimator.estimateWithRatio(
-                    pf.images, ratio, mode, skipFav, skipLowGain, minGainPercent);
-        }
     }
 
     private void showFolders(List<PlanFolder> list) {
@@ -312,7 +281,6 @@ public class PreviewActivity extends Activity {
         ViewerData d = new ViewerData();
         d.images = openFolderRef.images;
         d.index = index;
-        d.image = openFolderRef.images.get(index);
         d.mode = mode;
         d.quality = quality;
         d.skipFav = skipFav;

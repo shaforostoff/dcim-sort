@@ -17,10 +17,6 @@ import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.codec.NativeCodecs;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
-import com.shaforostoff.dcimsort.geo.CoordCache;
-import com.shaforostoff.dcimsort.geo.GeoCache;
-import com.shaforostoff.dcimsort.geo.GeoExtractor;
-import com.shaforostoff.dcimsort.geo.PlaceResolver;
 import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.util.ThreadPlanner;
 
@@ -109,13 +105,7 @@ public class OrganizeService extends Service {
         ContentResolver resolver = getContentResolver();
 
         MediaRepository repo = new MediaRepository(this);
-        GeoCache cache = new GeoCache(this);
-        CoordCache coordCache = new CoordCache(this);
-        GeoExtractor geo = new GeoExtractor(repo);
-        PlaceResolver places = new PlaceResolver(this, cache);
-        TargetResolver targets = new TargetResolver(geo, places,
-                req.groupMode != null ? req.groupMode : com.shaforostoff.dcimsort.data.GroupMode.PLACE_MONTH,
-                coordCache);
+        TargetResolver targets = new TargetResolver(this, repo, req.groupMode);
         OrganizeJournal journal = new OrganizeJournal(this);
         journal.reconcile(resolver);
         Mover mover = new Mover(this, journal);
@@ -137,7 +127,6 @@ public class OrganizeService extends Service {
         final AtomicInteger skipped = new AtomicInteger();
         final AtomicInteger failed = new AtomicInteger();
         final AtomicInteger sinceFlush = new AtomicInteger();
-        // Distinct destination subfolders that actually received a file, for the completion summary.
         final Set<String> destFolders = ConcurrentHashMap.newKeySet();
 
         for (final MediaImage img : req.images) {
@@ -155,50 +144,37 @@ public class OrganizeService extends Service {
                     // Copy (keep original) when the user asked, or when the source isn't movable
                     // in place (e.g. a Google Photos cloud pick with no MediaStore row).
                     boolean copy = req.keepOriginal || !img.isMovable();
-                    if (copy) {
-                        File temp = recompress
-                                ? rc.compressToTemp(img.readUri(), req.mode, req.quality) : null;
-                        // skip-low-gain: too little saved → import the original untouched (temp=null).
-                        if (lowGain(skipLowGain, keepRatio, temp, img)) {
-                            temp.delete();
-                            temp = null;
-                        }
-                        boolean ok;
-                        try {
-                            // If recompression was requested but failed, fall back to an exact copy.
-                            ok = mover.importCopy(img, temp, req.mode, srcRel, folder, req.volumeName);
-                        } finally {
-                            if (temp != null) temp.delete();
-                        }
-                        if (ok) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
-                        else failed.incrementAndGet();
-                    } else if (!recompress) {
-                        Mover.Outcome o = mover.move(img, srcRel, folder);
-                        if (o == Mover.Outcome.MOVED) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
-                        else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
-                        else failed.incrementAndGet();
-                    } else {
-                        File temp = rc.compressToTemp(img.readUri(), req.mode, req.quality);
-                        if (lowGain(skipLowGain, keepRatio, temp, img)) {
-                            // Too little saved → leave the photo uncompressed and just move it.
-                            temp.delete();
-                            Mover.Outcome o = mover.move(img, srcRel, folder);
-                            if (o == Mover.Outcome.MOVED) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
-                            else if (o == Mover.Outcome.SKIPPED) skipped.incrementAndGet();
-                            else failed.incrementAndGet();
+                    File temp = recompress
+                            ? rc.compressToTemp(img.readUri(), req.mode, req.quality) : null;
+                    // skip-low-gain: too little saved → keep the original bytes as they are.
+                    boolean lowGain = lowGain(skipLowGain, keepRatio, temp, img);
+                    if (lowGain) {
+                        temp.delete();
+                        temp = null;
+                    }
+                    Mover.Outcome o;
+                    try {
+                        if (copy) {
+                            // A null temp (no recompress, low gain, or failed encode) copies exactly.
+                            o = outcome(mover.importCopy(
+                                    img, temp, req.mode, srcRel, folder, req.volumeName));
+                        } else if (!recompress || lowGain) {
+                            o = mover.move(img, srcRel, folder);
                         } else {
-                            boolean ok = false;
-                            if (temp != null) {
-                                try {
-                                    ok = mover.publishRecompressed(
-                                            img, temp, req.mode, srcRel, folder, req.volumeName);
-                                } finally {
-                                    temp.delete();
-                                }
-                            }
-                            if (ok) { moved.incrementAndGet(); recordFolder(destFolders, folder); }
-                            else failed.incrementAndGet();
+                            o = outcome(temp != null && mover.publishRecompressed(
+                                    img, temp, req.mode, srcRel, folder, req.volumeName));
                         }
+                    } finally {
+                        if (temp != null) temp.delete();
+                    }
+                    if (o == Mover.Outcome.MOVED) {
+                        moved.incrementAndGet();
+                        // Destination subfolders that received a file, for the completion summary.
+                        if (folder != null && !folder.isEmpty()) destFolders.add(folder);
+                    } else if (o == Mover.Outcome.SKIPPED) {
+                        skipped.incrementAndGet();
+                    } else {
+                        failed.incrementAndGet();
                     }
                 } catch (Throwable t) {
                     failed.incrementAndGet();
@@ -208,8 +184,7 @@ public class OrganizeService extends Service {
                     publish(d, total, currentFolder);
                     if (sinceFlush.incrementAndGet() >= 25) {
                         sinceFlush.set(0);
-                        cache.flush();
-                        coordCache.flush();
+                        targets.flush();
                     }
                 }
             });
@@ -227,8 +202,7 @@ public class OrganizeService extends Service {
         } catch (InterruptedException ignore) {
             Thread.currentThread().interrupt();
         }
-        cache.flush();
-        coordCache.flush();
+        targets.flush();
         journal.close();
 
         // The batch just freed a burst of large native encode buffers (jpegli/libavif). Nudge the
@@ -245,9 +219,8 @@ public class OrganizeService extends Service {
         finishService();
     }
 
-    /** Records a destination subfolder that received a file (ignores the no-grouping null folder). */
-    private static void recordFolder(Set<String> dest, String folder) {
-        if (folder != null && !folder.isEmpty()) dest.add(folder);
+    private static Mover.Outcome outcome(boolean ok) {
+        return ok ? Mover.Outcome.MOVED : Mover.Outcome.FAILED;
     }
 
     /**

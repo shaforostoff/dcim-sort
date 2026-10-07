@@ -10,7 +10,6 @@ import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowInsets;
 import android.widget.CheckBox;
 import android.widget.TextView;
 
@@ -45,6 +44,8 @@ public class ViewerActivity extends Activity {
     private int quality;
     private boolean skipFav;
 
+    private Recompressor rc;
+
     private Bitmap originalBitmap;
     private Bitmap compressedBitmap;
     private String overlayText;
@@ -62,20 +63,20 @@ public class ViewerActivity extends Activity {
         btnExclude = findViewById(R.id.btn_exclude);
 
         ViewerData data = ViewerData.take();
-        if (data == null || data.image == null) {
+        if (data == null || data.images == null || data.index < 0 || data.index >= data.images.size()) {
             finish();
             return;
         }
         images = data.images;
         currentIndex = data.index;
-        image = (images != null && currentIndex >= 0 && currentIndex < images.size())
-                ? images.get(currentIndex) : data.image;
+        image = images.get(currentIndex);
         mode = data.mode != null ? data.mode : CompressMode.NONE;
         quality = data.quality;
         skipFav = data.skipFav;
+        rc = new Recompressor(this, new MediaRepository(this));
 
         // Swipe navigation between photos (only when there are multiple images).
-        if (images != null && images.size() > 1) {
+        if (images.size() > 1) {
             imageView.setNavigationListener(new ZoomableImageView.NavigationListener() {
                 @Override public void onSwipePrev() { navigateTo(currentIndex - 1); }
                 @Override public void onSwipeNext() { navigateTo(currentIndex + 1); }
@@ -83,7 +84,6 @@ public class ViewerActivity extends Activity {
         }
 
         // Include checkbox.
-        updateExcludeButton();
         btnExclude.setOnClickListener(v -> SelectionStore.toggle(image.key()));
 
         if (mode.recompresses()) {
@@ -92,17 +92,10 @@ public class ViewerActivity extends Activity {
                 @Override public void onCompareStart() { startCompare(); }
                 @Override public void onCompareEnd() { endCompare(); }
             });
-            hint.setVisibility(View.VISIBLE);
-            if (skipFav && image.favorite) {
-                hint.setText(R.string.favorite_no_compress);
-            } else {
-                imageView.setCompareEnabled(true);
-                // Compression is deferred until the user actually holds (see startCompare).
-            }
         }
 
         applyBottomInsets();
-        loadOriginal();
+        showImage();
     }
 
     /** Hold began: show the compressed bitmap, building it on first hold only. */
@@ -145,8 +138,6 @@ public class ViewerActivity extends Activity {
     }
 
     private void loadOriginal() {
-        final MediaRepository repo = new MediaRepository(this);
-        final Recompressor rc = new Recompressor(this, repo);
         final int maxDim = screenMaxDim();
         final MediaImage target = image;
         final int gen = generation;
@@ -169,8 +160,6 @@ public class ViewerActivity extends Activity {
     }
 
     private void buildCompressed() {
-        final MediaRepository repo = new MediaRepository(this);
-        final Recompressor rc = new Recompressor(this, repo);
         final MediaImage target = image;
         final int gen = generation;
         final int maxDim = screenMaxDim();
@@ -250,12 +239,15 @@ public class ViewerActivity extends Activity {
     }
 
     private void navigateTo(int index) {
-        if (images == null || index < 0 || index >= images.size()) return;
-        generation++;
+        if (index < 0 || index >= images.size()) return;
         currentIndex = index;
         image = images.get(currentIndex);
+        showImage();
+    }
 
-        // Reset compare state for the new image.
+    /** Resets per-image state (compare, hint, include checkbox) for {@link #image} and loads it. */
+    private void showImage() {
+        generation++; // cancels async work still running for the previous image
         holding = false;
         compressionStarted = false;
         if (compressedBitmap != null) {
@@ -266,22 +258,15 @@ public class ViewerActivity extends Activity {
         overlay.setVisibility(View.GONE);
 
         if (mode.recompresses()) {
+            // Compression itself is deferred until the user actually holds (see startCompare).
+            boolean fav = skipFav && image.favorite;
             hint.setVisibility(View.VISIBLE);
-            if (skipFav && image.favorite) {
-                hint.setText(R.string.favorite_no_compress);
-                imageView.setCompareEnabled(false);
-            } else {
-                hint.setText(R.string.hold_to_compare);
-                imageView.setCompareEnabled(true);
-            }
+            hint.setText(fav ? R.string.favorite_no_compress : R.string.hold_to_compare);
+            imageView.setCompareEnabled(!fav);
         }
 
-        updateExcludeButton();
-        loadOriginal();
-    }
-
-    private void updateExcludeButton() {
         btnExclude.setChecked(SelectionStore.isSelected(image.key()));
+        loadOriginal();
     }
 
     /** Lift the bottom hint/overlay/button above the system navigation bar (edge-to-edge on API 35+). */
@@ -290,28 +275,20 @@ public class ViewerActivity extends Activity {
         View root = findViewById(android.R.id.content);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             int bottom = SystemBars.bottom(insets);
-            setBottomMargin(hint, base16 + bottom);
-            setBottomMargin(overlay, bottom);
-            setTopMargin(btnExclude, base16 + SystemBars.top(insets));
+            setMargin(hint, false, base16 + bottom);
+            setMargin(overlay, false, bottom);
+            setMargin(btnExclude, true, base16 + SystemBars.top(insets));
             return insets;
         });
         root.requestApplyInsets();
     }
 
-    private static void setBottomMargin(View v, int margin) {
+    private static void setMargin(View v, boolean top, int margin) {
         ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) v.getLayoutParams();
-        if (lp.bottomMargin != margin) {
-            lp.bottomMargin = margin;
-            v.setLayoutParams(lp);
-        }
-    }
-
-    private static void setTopMargin(View v, int margin) {
-        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) v.getLayoutParams();
-        if (lp.topMargin != margin) {
-            lp.topMargin = margin;
-            v.setLayoutParams(lp);
-        }
+        if ((top ? lp.topMargin : lp.bottomMargin) == margin) return;
+        if (top) lp.topMargin = margin;
+        else lp.bottomMargin = margin;
+        v.setLayoutParams(lp);
     }
 
     @Override
