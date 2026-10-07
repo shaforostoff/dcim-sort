@@ -11,10 +11,8 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Tiny append-only log of in-flight recompress operations, in app-private files. Lets a crash or
@@ -75,27 +73,27 @@ public class OrganizeJournal {
     public synchronized void reconcile(ContentResolver resolver) {
         close();
         if (!file.exists()) return;
-        List<String[]> begins = new ArrayList<>();
-        Set<Long> resolved = new HashSet<>();
+        // Replayed in order: an id can be begun again after an abort (in-place overwrite failed,
+        // then the insert fallback started), and only its latest begin may still be open.
+        Map<Long, String> open = new HashMap<>();
         try (BufferedReader r = new BufferedReader(new FileReader(file))) {
             String line;
             while ((line = r.readLine()) != null) {
                 String[] parts = line.split("\t");
-                if (parts.length == 0) continue;
-                if ("B".equals(parts[0]) && parts.length >= 3) {
-                    begins.add(new String[]{parts[1], parts[2]});
-                } else if (("C".equals(parts[0]) || "X".equals(parts[0])) && parts.length >= 2) {
-                    try { resolved.add(Long.parseLong(parts[1])); } catch (NumberFormatException ignore) {}
+                try {
+                    if ("B".equals(parts[0]) && parts.length >= 3) {
+                        open.put(Long.parseLong(parts[1]), parts[2]);
+                    } else if (("C".equals(parts[0]) || "X".equals(parts[0])) && parts.length >= 2) {
+                        open.remove(Long.parseLong(parts[1]));
+                    }
+                } catch (NumberFormatException ignore) {
                 }
             }
         } catch (IOException ignore) {
         }
-        for (String[] b : begins) {
-            long id;
-            try { id = Long.parseLong(b[0]); } catch (NumberFormatException e) { continue; }
-            if (resolved.contains(id)) continue;
+        for (String uri : open.values()) {
             try {
-                resolver.delete(Uri.parse(b[1]), null, null);
+                resolver.delete(Uri.parse(uri), null, null);
             } catch (Exception ignore) {
                 // Already gone or no permission; nothing else we can safely do.
             }
