@@ -2,8 +2,7 @@ package com.shaforostoff.dcimsort.ui;
 
 import android.app.Activity;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.ImageDecoder;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -18,7 +17,6 @@ import com.shaforostoff.dcimsort.data.CompressMode;
 import com.shaforostoff.dcimsort.data.MediaImage;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.util.Formatter;
-import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.util.SystemBars;
 import com.shaforostoff.dcimsort.work.Recompressor;
 
@@ -164,21 +162,18 @@ public class ViewerActivity extends Activity {
         final int gen = generation;
         final int maxDim = screenMaxDim();
         // buildCompressed() is called from the main thread, so the displayed original (if any) is
-        // settled here. Decoding the temp straight to its pixel size means the compare bitmap is
-        // allocated once at the size we actually show, instead of being decoded large and then
-        // rescaled — which held a third full-resolution bitmap alongside the other two.
+        // settled here. Decoding the temp straight to the original's long side means the compare
+        // bitmap is allocated about the size we actually show, instead of being decoded large and
+        // then rescaled — which held a third full-resolution bitmap alongside the other two.
         final Bitmap shown = originalBitmap;
-        final int wantW = shown != null ? shown.getWidth() : 0;
-        final int wantH = shown != null ? shown.getHeight() : 0;
+        final int want = shown != null ? Math.max(shown.getWidth(), shown.getHeight()) : maxDim;
         executor.execute(() -> {
             File temp = rc.compressToTemp(target.readUri(), mode, quality);
             if (temp == null) return;
             long compSize = temp.length();
             // Never decode the temp at full resolution: it is only shown in the compare
             // overlay, which is bounded by screenMaxDim() just like the original.
-            Bitmap bmp = wantW > 0
-                    ? decodeAt(temp, wantW, wantH)
-                    : decodeSampled(temp.getAbsolutePath(), maxDim);
+            Bitmap bmp = rc.decodeOriented(Uri.fromFile(temp), want);
             temp.delete();
             if (bmp == null) return;
             final long fcompSize = compSize;
@@ -188,8 +183,9 @@ public class ViewerActivity extends Activity {
                     fbmp.recycle();
                     return;
                 }
-                // The matrix maps identically only at the original's pixel size; decodeAt normally
-                // lands there exactly, so this is a backstop for the legacy/no-original paths.
+                // The matrix maps identically only at the original's pixel size; the decode normally
+                // lands there, so this is a backstop for rounding, even-cropped HEIF output and the
+                // legacy (pre-API 28) sampled decode.
                 Bitmap toUse = fbmp;
                 if (originalBitmap != null
                         && (fbmp.getWidth() != originalBitmap.getWidth()
@@ -205,37 +201,6 @@ public class ViewerActivity extends Activity {
                 if (holding) showCompressed(); // finger still down → reveal as soon as it's ready
             });
         });
-    }
-
-    /** Decodes a local file to exactly {@code targetW} x {@code targetH} in a single allocation. */
-    private static Bitmap decodeAt(File file, int targetW, int targetH) {
-        if (Sdk.atLeastP()) {
-            try {
-                ImageDecoder.Source src = ImageDecoder.createSource(file);
-                return ImageDecoder.decodeBitmap(src, (decoder, info, source) -> {
-                    decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
-                    decoder.setTargetSize(targetW, targetH);
-                });
-            } catch (Exception ignore) {
-                // fall through to the sample-and-scale path
-            }
-        }
-        return decodeSampled(file.getAbsolutePath(), Math.max(targetW, targetH));
-    }
-
-    /** Decode a local file downsampled so its long side stays close to maxLongSide. */
-    private static Bitmap decodeSampled(String path, int maxLongSide) {
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(path, bounds);
-        int longest = Math.max(bounds.outWidth, bounds.outHeight);
-        int sample = 1;
-        // Halve only while the result still covers maxLongSide, so the compare bitmap is
-        // never upscaled back to the original's pixel size.
-        while (maxLongSide > 0 && longest / (sample * 2) >= maxLongSide) sample *= 2;
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inSampleSize = sample;
-        return BitmapFactory.decodeFile(path, opts);
     }
 
     private void navigateTo(int index) {
