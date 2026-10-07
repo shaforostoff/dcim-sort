@@ -61,21 +61,58 @@ bool writeFile(const char *path, const uint8_t *data, size_t size) {
     return wrote == size;
 }
 
-// Reads a float[3] field (R,G,B) from a GainmapMeta instance into out[3].
-void readFloat3(JNIEnv *env, jobject meta, jclass cls, const char *field, float out[3]) {
-    jfieldID fid = env->GetFieldID(cls, field, "[F");
-    if (!fid) return;
-    auto arr = (jfloatArray) env->GetObjectField(meta, fid);
-    if (!arr) return;
+// Copies a Java byte[] (may be null) into a vector; empty when null or zero-length.
+std::vector<uint8_t> toBytes(JNIEnv *env, jbyteArray arr) {
+    std::vector<uint8_t> out;
+    if (!arr) return out;
     jsize n = env->GetArrayLength(arr);
-    if (n >= 3) env->GetFloatArrayRegion(arr, 0, 3, out);
-    env->DeleteLocalRef(arr);
+    out.resize((size_t) n);
+    if (n > 0) env->GetByteArrayRegion(arr, 0, n, (jbyte *) out.data());
+    return out;
 }
 
-float readFloat(JNIEnv *env, jobject meta, jclass cls, const char *field) {
-    jfieldID fid = env->GetFieldID(cls, field, "F");
-    return fid ? env->GetFloatField(meta, fid) : 0.f;
-}
+// log2 of a linear ratio, treating non-positive values as 1 (log2 = 0).
+float safeLog2(float v) { return std::log2(v > 0.f ? v : 1.f); }
+
+bool allEqual3(const float v[3]) { return v[0] == v[1] && v[1] == v[2]; }
+
+// GainmapMeta (android.graphics.Gainmap semantics: linear ratios, per-channel {R,G,B}), read via
+// JNI reflection. Fields the Java object doesn't carry keep the defaults below.
+struct GainmapParams {
+    float ratioMin[3] = {1, 1, 1}, ratioMax[3] = {2, 2, 2}, gamma[3] = {1, 1, 1};
+    float epsSdr[3] = {0, 0, 0}, epsHdr[3] = {0, 0, 0};
+    float displayRatioSdr = 1.f, displayRatioHdr = 2.f;
+
+    void read(JNIEnv *env, jobject meta) {
+        if (!meta) return;
+        jclass cls = env->GetObjectClass(meta);
+        auto f3 = [&](const char *field, float out[3]) {
+            jfieldID fid = env->GetFieldID(cls, field, "[F");
+            if (!fid) return;
+            auto arr = (jfloatArray) env->GetObjectField(meta, fid);
+            if (!arr) return;
+            if (env->GetArrayLength(arr) >= 3) env->GetFloatArrayRegion(arr, 0, 3, out);
+            env->DeleteLocalRef(arr);
+        };
+        auto f1 = [&](const char *field) {
+            jfieldID fid = env->GetFieldID(cls, field, "F");
+            return fid ? env->GetFloatField(meta, fid) : 0.f;
+        };
+        f3("ratioMin", ratioMin);
+        f3("ratioMax", ratioMax);
+        f3("gamma", gamma);
+        f3("epsilonSdr", epsSdr);
+        f3("epsilonHdr", epsHdr);
+        displayRatioSdr = f1("displayRatioSdr");
+        displayRatioHdr = f1("displayRatioHdr");
+    }
+
+    // All channels share the same values → single-channel (grayscale) gain map.
+    bool singleChannel() const {
+        return allEqual3(ratioMin) && allEqual3(ratioMax) && allEqual3(gamma)
+               && allEqual3(epsSdr) && allEqual3(epsHdr);
+    }
+};
 
 #ifdef ENABLE_AVIF
 
@@ -116,39 +153,19 @@ avifImage *buildGainMapImage(const LockedBitmap &gm) {
     return img;
 }
 
-// Maps GainmapMeta (android.graphics.Gainmap semantics) onto libavif's gain-map metadata.
-void applyGainMapMeta(JNIEnv *env, avifGainMap *gainMap, jobject meta) {
-    if (!meta) return;
-    jclass cls = env->GetObjectClass(meta);
-    float ratioMin[3] = {1, 1, 1}, ratioMax[3] = {2, 2, 2}, gamma[3] = {1, 1, 1};
-    float epsSdr[3] = {0, 0, 0}, epsHdr[3] = {0, 0, 0};
-    readFloat3(env, meta, cls, "ratioMin", ratioMin);
-    readFloat3(env, meta, cls, "ratioMax", ratioMax);
-    readFloat3(env, meta, cls, "gamma", gamma);
-    readFloat3(env, meta, cls, "epsilonSdr", epsSdr);
-    readFloat3(env, meta, cls, "epsilonHdr", epsHdr);
-    float displayRatioSdr = readFloat(env, meta, cls, "displayRatioSdr");
-    float displayRatioHdr = readFloat(env, meta, cls, "displayRatioHdr");
-
-    // libavif stores gain-map min/max as log2 ratios and gamma/offsets per channel as fractions.
-    // android.graphics.Gainmap getRatioMin/Max are linear ratios → take log2.
+// Maps the gain-map parameters onto libavif's metadata: min/max and headroom as log2 ratios,
+// gamma/offsets per channel as fractions.
+void applyGainMapMeta(const GainmapParams &p, avifGainMap *gainMap) {
     const int32_t denom = 1000000;
     for (int c = 0; c < 3; ++c) {
-        gainMap->gainMapMin[c].n = (int32_t) (std::log2(ratioMin[c] <= 0 ? 1.f : ratioMin[c]) * denom);
-        gainMap->gainMapMin[c].d = denom;
-        gainMap->gainMapMax[c].n = (int32_t) (std::log2(ratioMax[c] <= 0 ? 1.f : ratioMax[c]) * denom);
-        gainMap->gainMapMax[c].d = denom;
-        gainMap->gainMapGamma[c].n = (uint32_t) (gamma[c] * denom);
-        gainMap->gainMapGamma[c].d = denom;
-        gainMap->baseOffset[c].n = (int32_t) (epsSdr[c] * denom);
-        gainMap->baseOffset[c].d = denom;
-        gainMap->alternateOffset[c].n = (int32_t) (epsHdr[c] * denom);
-        gainMap->alternateOffset[c].d = denom;
+        gainMap->gainMapMin[c] = {(int32_t) (safeLog2(p.ratioMin[c]) * denom), denom};
+        gainMap->gainMapMax[c] = {(int32_t) (safeLog2(p.ratioMax[c]) * denom), denom};
+        gainMap->gainMapGamma[c] = {(uint32_t) (p.gamma[c] * denom), denom};
+        gainMap->baseOffset[c] = {(int32_t) (p.epsSdr[c] * denom), denom};
+        gainMap->alternateOffset[c] = {(int32_t) (p.epsHdr[c] * denom), denom};
     }
-    gainMap->baseHdrHeadroom.n = (uint32_t) (std::log2(displayRatioSdr <= 0 ? 1.f : displayRatioSdr) * denom);
-    gainMap->baseHdrHeadroom.d = denom;
-    gainMap->alternateHdrHeadroom.n = (uint32_t) (std::log2(displayRatioHdr <= 0 ? 1.f : displayRatioHdr) * denom);
-    gainMap->alternateHdrHeadroom.d = denom;
+    gainMap->baseHdrHeadroom = {(uint32_t) (safeLog2(p.displayRatioSdr) * denom), denom};
+    gainMap->alternateHdrHeadroom = {(uint32_t) (safeLog2(p.displayRatioHdr) * denom), denom};
 }
 
 #endif // ENABLE_AVIF
@@ -194,7 +211,7 @@ static void setMemDest(j_compress_ptr cinfo, std::vector<uint8_t> &buf) {
     cinfo->dest = &d->pub;
 }
 
-// Encodes pixels to a JPEG buffer. isRgba: source is RGBA_8888 (else ALPHA_8).
+// Encodes pixels to a JPEG buffer. isRgba: source is RGBA_8888 (else ALPHA_8; implies grayscale).
 // grayscale: encode as JCS_GRAYSCALE using the R channel (RGBA) or the single byte (A_8).
 static std::vector<uint8_t> encodeToJpegBuffer(
         const void *pixels, uint32_t w, uint32_t h, uint32_t stride,
@@ -212,28 +229,16 @@ static std::vector<uint8_t> encodeToJpegBuffer(
     jpegli_set_defaults(&cinfo);
     jpegli_set_quality(&cinfo, quality, TRUE);
     jpegli_start_compress(&cinfo, TRUE);
+    // One packed row at a time: RGB (alpha dropped), or one channel for grayscale.
     auto *src = reinterpret_cast<const uint8_t *>(pixels);
-    if (grayscale) {
-        std::vector<uint8_t> row(w);
-        while (cinfo.next_scanline < h) {
-            const uint8_t *s = src + (size_t) cinfo.next_scanline * stride;
-            for (uint32_t x = 0; x < w; ++x)
-                row[x] = isRgba ? s[x * 4] : s[x];
-            JSAMPROW r = row.data();
-            jpegli_write_scanlines(&cinfo, &r, 1);
-        }
-    } else {
-        std::vector<uint8_t> row(w * 3);
-        while (cinfo.next_scanline < h) {
-            const uint8_t *s = src + (size_t) cinfo.next_scanline * stride;
-            for (uint32_t x = 0; x < w; ++x) {
-                row[x * 3]     = s[x * 4];
-                row[x * 3 + 1] = s[x * 4 + 1];
-                row[x * 3 + 2] = s[x * 4 + 2];
-            }
-            JSAMPROW r = row.data();
-            jpegli_write_scanlines(&cinfo, &r, 1);
-        }
+    const uint32_t comps = grayscale ? 1 : 3, srcStep = isRgba ? 4 : 1;
+    std::vector<uint8_t> row((size_t) w * comps);
+    while (cinfo.next_scanline < h) {
+        const uint8_t *s = src + (size_t) cinfo.next_scanline * stride;
+        for (uint32_t x = 0; x < w; ++x)
+            for (uint32_t c = 0; c < comps; ++c) row[x * comps + c] = s[x * srcStep + c];
+        JSAMPROW r = row.data();
+        jpegli_write_scanlines(&cinfo, &r, 1);
     }
     jpegli_finish_compress(&cinfo);
     jpegli_destroy_compress(&cinfo);
@@ -241,8 +246,6 @@ static std::vector<uint8_t> encodeToJpegBuffer(
 }
 
 // ---- JPEG_R (UltraHDR JPEG) segment builders --------------------------------
-
-static bool allEqual3(const float v[3]) { return v[0] == v[1] && v[1] == v[2]; }
 
 static std::string fmtF(float v) {
     char tmp[32];
@@ -259,16 +262,10 @@ static std::string rdfSeq3(const float v[3]) {
 
 // Builds the XMP APP1 segment carrying JPEG Gainmap Metadata (hdrgm namespace, ISO 21496-1).
 // Single-channel gainmaps use scalar attribute values; multi-channel uses rdf:Seq elements.
-static std::vector<uint8_t> buildXmpApp1(
-        const float ratioMin[3], const float ratioMax[3],
-        const float gamma[3], const float epsSdr[3], const float epsHdr[3],
-        float displayRatioSdr, float displayRatioHdr) {
-    auto log2s = [](float v) { return std::log2(v > 0.f ? v : 1.f); };
-    float mapMin[3] = {log2s(ratioMin[0]), log2s(ratioMin[1]), log2s(ratioMin[2])};
-    float mapMax[3] = {log2s(ratioMax[0]), log2s(ratioMax[1]), log2s(ratioMax[2])};
-    float capMin = log2s(displayRatioSdr), capMax = log2s(displayRatioHdr);
-    bool single = allEqual3(mapMin) && allEqual3(mapMax)
-                  && allEqual3(gamma) && allEqual3(epsSdr) && allEqual3(epsHdr);
+static std::vector<uint8_t> buildXmpApp1(const GainmapParams &p) {
+    float mapMin[3] = {safeLog2(p.ratioMin[0]), safeLog2(p.ratioMin[1]), safeLog2(p.ratioMin[2])};
+    float mapMax[3] = {safeLog2(p.ratioMax[0]), safeLog2(p.ratioMax[1]), safeLog2(p.ratioMax[2])};
+    float capMin = safeLog2(p.displayRatioSdr), capMax = safeLog2(p.displayRatioHdr);
 
     std::string xmp;
     xmp += "<?xpacket begin=\"\xef\xbb\xbf\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>";
@@ -277,18 +274,22 @@ static std::vector<uint8_t> buildXmpApp1(
     xmp += "<rdf:Description rdf:about=\"\""
            " xmlns:hdrgm=\"http://ns.adobe.com/hdr-gain-map/1.0/\""
            " hdrgm:Version=\"1.0\"";
-    if (single) {
-        xmp += " hdrgm:GainMapMin=\"";    xmp += fmtF(mapMin[0]);  xmp += "\"";
-        xmp += " hdrgm:GainMapMax=\"";    xmp += fmtF(mapMax[0]);  xmp += "\"";
-        xmp += " hdrgm:Gamma=\"";         xmp += fmtF(gamma[0]);   xmp += "\"";
-        xmp += " hdrgm:OffsetSdr=\"";     xmp += fmtF(epsSdr[0]);  xmp += "\"";
-        xmp += " hdrgm:OffsetHdr=\"";     xmp += fmtF(epsHdr[0]);  xmp += "\"";
-        xmp += " hdrgm:HDRCapacityMin=\""; xmp += fmtF(capMin);    xmp += "\"";
-        xmp += " hdrgm:HDRCapacityMax=\""; xmp += fmtF(capMax);    xmp += "\"";
+    auto attr = [&](const char *name, float v) {
+        xmp += " hdrgm:"; xmp += name; xmp += "=\""; xmp += fmtF(v); xmp += "\"";
+    };
+    if (p.singleChannel()) {
+        attr("GainMapMin", mapMin[0]);
+        attr("GainMapMax", mapMax[0]);
+        attr("Gamma", p.gamma[0]);
+        attr("OffsetSdr", p.epsSdr[0]);
+        attr("OffsetHdr", p.epsHdr[0]);
+        attr("HDRCapacityMin", capMin);
+        attr("HDRCapacityMax", capMax);
         xmp += "/>";
     } else {
-        xmp += " hdrgm:HDRCapacityMin=\""; xmp += fmtF(capMin); xmp += "\"";
-        xmp += " hdrgm:HDRCapacityMax=\""; xmp += fmtF(capMax); xmp += "\">";
+        attr("HDRCapacityMin", capMin);
+        attr("HDRCapacityMax", capMax);
+        xmp += ">";
         auto elem = [&](const char *name, const float v[3]) {
             xmp += "<hdrgm:"; xmp += name; xmp += ">";
             xmp += rdfSeq3(v);
@@ -296,9 +297,9 @@ static std::vector<uint8_t> buildXmpApp1(
         };
         elem("GainMapMin", mapMin);
         elem("GainMapMax", mapMax);
-        elem("Gamma",      gamma);
-        elem("OffsetSdr",  epsSdr);
-        elem("OffsetHdr",  epsHdr);
+        elem("Gamma",      p.gamma);
+        elem("OffsetSdr",  p.epsSdr);
+        elem("OffsetHdr",  p.epsHdr);
         xmp += "</rdf:Description>";
     }
     xmp += "</rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>";
@@ -319,7 +320,9 @@ static std::vector<uint8_t> buildXmpApp1(
 }
 
 // Wraps a raw TIFF block as a JPEG Exif APP1 segment (FF E1 + "Exif\0\0" + tiff).
-static std::vector<uint8_t> buildExifApp1(const uint8_t *tiff, size_t tiffLen) {
+static std::vector<uint8_t> buildExifApp1(const std::vector<uint8_t> &tiffBuf) {
+    const uint8_t *tiff = tiffBuf.data();
+    size_t tiffLen = tiffBuf.size();
     if (tiffLen + 8 > 0xFFFF) tiffLen = 0xFFFF - 8;
     auto segLen = static_cast<uint16_t>(tiffLen + 8); // 2(len) + 6("Exif\0\0")
     std::vector<uint8_t> seg;
@@ -386,14 +389,8 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeAvif(
     bool ok = fillYuvFromRgba(image, baseBmp);
 
     // Optional EXIF (raw TIFF block) embedded directly by libavif.
-    if (ok && exifTiff) {
-        jsize n = env->GetArrayLength(exifTiff);
-        if (n > 0) {
-            std::vector<uint8_t> buf((size_t) n);
-            env->GetByteArrayRegion(exifTiff, 0, n, (jbyte *) buf.data());
-            avifImageSetMetadataExif(image, buf.data(), buf.size());
-        }
-    }
+    std::vector<uint8_t> exif = toBytes(env, exifTiff);
+    if (ok && !exif.empty()) avifImageSetMetadataExif(image, exif.data(), exif.size());
 
     // Optional UltraHDR gain map.
     if (ok && gainmapContents) {
@@ -404,7 +401,9 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeAvif(
                 avifGainMap *gainMap = avifGainMapCreate();
                 if (gainMap) {
                     gainMap->image = gmImage;
-                    applyGainMapMeta(env, gainMap, meta);
+                    GainmapParams params;
+                    params.read(env, meta);
+                    applyGainMapMeta(params, gainMap);
                     image->gainMap = gainMap; // ownership transferred to image
                 } else {
                     avifImageDestroy(gmImage);
@@ -472,49 +471,15 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeJpeg(
     LockedBitmap bmp;
     if (!bmp.lock(env, base)) return JNI_FALSE;
     if (bmp.info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return JNI_FALSE;
-
+    std::vector<uint8_t> jpeg = encodeToJpegBuffer(
+            bmp.pixels, bmp.info.width, bmp.info.height, bmp.info.stride,
+            /*isRgba=*/true, (int) quality, /*grayscale=*/false);
+    if (jpeg.empty()) return JNI_FALSE;
     const char *path = env->GetStringUTFChars(outPath, nullptr);
     if (!path) return JNI_FALSE;
-    FILE *out = std::fopen(path, "wb");
+    bool ok = writeFile(path, jpeg.data(), jpeg.size());
     env->ReleaseStringUTFChars(outPath, path);
-    if (!out) return JNI_FALSE;
-
-    int w = (int) bmp.info.width;
-    int h = (int) bmp.info.height;
-
-    // jpegli expects packed RGB; drop the alpha from the RGBA rows.
-    std::vector<uint8_t> rgb((size_t) w * h * 3);
-    auto *src = (const uint8_t *) bmp.pixels;
-    for (int y = 0; y < h; ++y) {
-        const uint8_t *srow = src + (size_t) y * bmp.info.stride;
-        uint8_t *drow = rgb.data() + (size_t) y * w * 3;
-        for (int x = 0; x < w; ++x) {
-            drow[x * 3 + 0] = srow[x * 4 + 0];
-            drow[x * 3 + 1] = srow[x * 4 + 1];
-            drow[x * 3 + 2] = srow[x * 4 + 2];
-        }
-    }
-
-    jpeg_compress_struct cinfo;
-    jpeg_error_mgr jerr;
-    cinfo.err = jpegli_std_error(&jerr);
-    jpegli_create_compress(&cinfo);
-    jpegli_stdio_dest(&cinfo, out);
-    cinfo.image_width = w;
-    cinfo.image_height = h;
-    cinfo.input_components = 3;
-    cinfo.in_color_space = JCS_RGB;
-    jpegli_set_defaults(&cinfo);
-    jpegli_set_quality(&cinfo, (int) quality, TRUE);
-    jpegli_start_compress(&cinfo, TRUE);
-    while (cinfo.next_scanline < cinfo.image_height) {
-        JSAMPROW row = rgb.data() + (size_t) cinfo.next_scanline * w * 3;
-        jpegli_write_scanlines(&cinfo, &row, 1);
-    }
-    jpegli_finish_compress(&cinfo);
-    jpegli_destroy_compress(&cinfo);
-    std::fclose(out);
-    return JNI_TRUE;
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 // Encodes a UltraHDR JPEG (JPEG_R) preserving the gain map from an Android Bitmap.
@@ -534,25 +499,10 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeJpegR(
     bool gmIsAlpha = gmBmp.info.format == ANDROID_BITMAP_FORMAT_A_8;
     if (!gmIsAlpha && gmBmp.info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return JNI_FALSE;
 
-    // Read gainmap metadata fields via JNI reflection (same as AVIF path).
-    float ratioMin[3] = {1, 1, 1}, ratioMax[3] = {2, 2, 2}, gamma_[3] = {1, 1, 1};
-    float epsSdr[3] = {0, 0, 0}, epsHdr[3] = {0, 0, 0};
-    float displayRatioSdr = 1.f, displayRatioHdr = 2.f;
-    if (meta) {
-        jclass cls = env->GetObjectClass(meta);
-        readFloat3(env, meta, cls, "ratioMin",   ratioMin);
-        readFloat3(env, meta, cls, "ratioMax",   ratioMax);
-        readFloat3(env, meta, cls, "gamma",      gamma_);
-        readFloat3(env, meta, cls, "epsilonSdr", epsSdr);
-        readFloat3(env, meta, cls, "epsilonHdr", epsHdr);
-        displayRatioSdr = readFloat(env, meta, cls, "displayRatioSdr");
-        displayRatioHdr = readFloat(env, meta, cls, "displayRatioHdr");
-    }
-
+    GainmapParams params;
+    params.read(env, meta);
     // Encode gainmap as grayscale when all per-channel metadata values are equal (common case).
-    bool single = allEqual3(ratioMin) && allEqual3(ratioMax) && allEqual3(gamma_)
-                  && allEqual3(epsSdr) && allEqual3(epsHdr);
-    bool gmGrayscale = single || gmIsAlpha;
+    bool gmGrayscale = params.singleChannel() || gmIsAlpha;
 
     std::vector<uint8_t> baseJpeg = encodeToJpegBuffer(
             baseBmp.pixels, baseBmp.info.width, baseBmp.info.height, baseBmp.info.stride,
@@ -565,17 +515,10 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeJpegR(
     if (gmJpeg.empty()) return JNI_FALSE;
 
     // Build metadata segments. EXIF is embedded here so MPF offsets stay stable.
+    std::vector<uint8_t> tiff = toBytes(env, exifTiff);
     std::vector<uint8_t> exifSeg;
-    if (exifTiff) {
-        jsize n = env->GetArrayLength(exifTiff);
-        if (n > 0) {
-            std::vector<uint8_t> tiff((size_t) n);
-            env->GetByteArrayRegion(exifTiff, 0, n, (jbyte *) tiff.data());
-            exifSeg = buildExifApp1(tiff.data(), tiff.size());
-        }
-    }
-    std::vector<uint8_t> xmpSeg = buildXmpApp1(
-            ratioMin, ratioMax, gamma_, epsSdr, epsHdr, displayRatioSdr, displayRatioHdr);
+    if (!tiff.empty()) exifSeg = buildExifApp1(tiff);
+    std::vector<uint8_t> xmpSeg = buildXmpApp1(params);
     // MPF gainmap offset = baseJpeg.size() - 2 regardless of how many APP segments we prepend.
     std::vector<uint8_t> mpfSeg = buildMpfApp2(
             (uint32_t) baseJpeg.size(), (uint32_t) gmJpeg.size());
