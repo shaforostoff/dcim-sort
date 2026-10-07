@@ -29,6 +29,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Decodes, re-encodes (WebP/HEIC/AVIF) and re-injects metadata. The output is written to a temp file
@@ -44,8 +46,7 @@ public class Recompressor {
     /** Stop timeout for the HEVC/AV1 image writers. */
     private static final long ENCODE_TIMEOUT_US = 12_000_000L;
 
-    private static Boolean heicEncoderCached;
-    private static Boolean avifEncoderCached;
+    private static final Map<String, Boolean> encoderCache = new HashMap<>();
 
     private final Context ctx;
     private final MediaRepository repo;
@@ -55,81 +56,40 @@ public class Recompressor {
         this.repo = repo;
     }
 
-    public static String extensionFor(CompressMode mode) {
+    /** True if this device can encode {@code mode}. */
+    public static boolean canEncode(CompressMode mode) {
         switch (mode) {
-            case HEIC: return ".heic";
-            case AVIF: return ".avif";
-            case JPEG: return ".jpg";
-            default: return ".webp";
+            // HEIC: HeifWriter (API 28+) on top of an HEVC encoder.
+            case HEIC: return Sdk.atLeastP() && hasEncoder(MediaFormat.MIMETYPE_VIDEO_HEVC);
+            // AVIF: the full flavor's bundled libavif works on every Android version; otherwise the
+            // platform encoder requires Android 16+ and an AV1 encoder.
+            case AVIF: return NativeCodecs.avifAvailable()
+                    || (Sdk.atLeastBaklava() && hasEncoder(MediaFormat.MIMETYPE_VIDEO_AV1));
+            // JPEG: only the full flavor's bundled jpegli (never in lite).
+            case JPEG: return NativeCodecs.jpegliAvailable();
+            default: return true;
         }
     }
 
-    public static String mimeFor(CompressMode mode) {
-        switch (mode) {
-            case HEIC: return "image/heic";
-            case AVIF: return "image/avif";
-            case JPEG: return "image/jpeg";
-            default: return "image/webp";
-        }
-    }
-
-    /** True if this device can encode HEIC (API 28+ and an HEVC encoder is present). */
-    public static synchronized boolean hasHeicEncoder() {
-        if (heicEncoderCached != null) return heicEncoderCached;
+    private static synchronized boolean hasEncoder(String mime) {
+        Boolean cached = encoderCache.get(mime);
+        if (cached != null) return cached;
         boolean ok = false;
-        if (Sdk.atLeastP()) {
-            try {
-                MediaCodecList list = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
-                for (MediaCodecInfo info : list.getCodecInfos()) {
-                    if (!info.isEncoder()) continue;
-                    for (String t : info.getSupportedTypes()) {
-                        if (MediaFormat.MIMETYPE_VIDEO_HEVC.equalsIgnoreCase(t)) {
-                            ok = true;
-                            break;
-                        }
+        try {
+            search:
+            for (MediaCodecInfo info : new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()) {
+                if (!info.isEncoder()) continue;
+                for (String t : info.getSupportedTypes()) {
+                    if (mime.equalsIgnoreCase(t)) {
+                        ok = true;
+                        break search;
                     }
-                    if (ok) break;
                 }
-            } catch (Throwable ignore) {
-                ok = false;
             }
+        } catch (Throwable ignore) {
         }
-        heicEncoderCached = ok;
+        encoderCache.put(mime, ok);
         return ok;
-    }
-
-    /**
-     * True if AVIF can be encoded: the full flavor's bundled libavif works on every Android version;
-     * otherwise the platform encoder requires Android 16+ and an AV1 encoder.
-     */
-    public static synchronized boolean hasAvifEncoder() {
-        if (NativeCodecs.avifAvailable()) return true;
-        if (avifEncoderCached != null) return avifEncoderCached;
-        boolean ok = false;
-        if (Sdk.atLeastBaklava()) {
-            try {
-                MediaCodecList list = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
-                for (MediaCodecInfo info : list.getCodecInfos()) {
-                    if (!info.isEncoder()) continue;
-                    for (String t : info.getSupportedTypes()) {
-                        if (MediaFormat.MIMETYPE_VIDEO_AV1.equalsIgnoreCase(t)) {
-                            ok = true;
-                            break;
-                        }
-                    }
-                    if (ok) break;
-                }
-            } catch (Throwable ignore) {
-                ok = false;
-            }
-        }
-        avifEncoderCached = ok;
-        return ok;
-    }
-
-    /** True if the full flavor's bundled jpegli JPEG encoder is available (never in lite). */
-    public static boolean hasJpegliEncoder() {
-        return NativeCodecs.jpegliAvailable();
     }
 
     /**
@@ -146,136 +106,18 @@ public class Recompressor {
      */
     private File compressToTemp(Uri source, CompressMode mode, int quality, int maxLongSide,
                                 boolean embedExif) {
-        // Full flavor: AVIF goes through libavif (HDR-preserving, EXIF embedded during encode).
-        if (mode == CompressMode.AVIF && NativeCodecs.avifAvailable()) {
-            return compressAvifNative(source, quality, maxLongSide, embedExif);
-        }
-        // Full flavor: JPEG goes through jpegli; UltraHDR gain map is preserved when present.
-        if (mode == CompressMode.JPEG && NativeCodecs.jpegliAvailable()) {
-            return compressJpegNative(source, quality, maxLongSide, embedExif);
-        }
         Bitmap bmp = decodeOriented(source, maxLongSide);
         if (bmp == null) return null;
         File out = null;
         try {
-            out = File.createTempFile("cmp_", extensionFor(mode), ctx.getCacheDir());
-            // HEIF containers take their Exif item from the writer during encode.
-            boolean heif = mode == CompressMode.HEIC || mode == CompressMode.AVIF;
-            byte[] heifExif = embedExif && heif ? buildHeifExif(readSourceExif(source)) : null;
-            boolean ok = encodeBitmap(bmp, mode, quality, heifExif, out);
-            if (!ok) {
-                out.delete();
-                return null;
-            }
-            if (embedExif && !heif) reinjectExif(source, out);
-            return out;
-        } catch (IOException e) {
-            if (out != null) out.delete();
-            return null;
+            out = File.createTempFile("cmp_", mode.extension, ctx.getCacheDir());
+            if (encode(bmp, mode, quality, embedExif ? source : null, out)) return out;
+        } catch (IOException ignore) {
         } finally {
             bmp.recycle();
         }
-    }
-
-    /**
-     * Full-flavor AVIF path: decodes the source (keeping its UltraHDR gain map when present), then
-     * hands the base bitmap, gain map and a raw EXIF/TIFF block to libavif, which embeds HDR and
-     * metadata during encode — so no ISO-BMFF EXIF surgery is needed afterward.
-     */
-    private File compressAvifNative(Uri source, int quality, int maxLongSide, boolean embedExif) {
-        Bitmap base = decodeOriented(source, maxLongSide);
-        if (base == null) return null;
-        Bitmap gainmapContents = null;
-        GainmapMeta meta = null;
-        // Gain map in AVIF (ISO 21496-1) requires Android 16+ to decode; skip on older devices.
-        if (Sdk.atLeastBaklava() && base.hasGainmap()) {
-            Gainmap g = base.getGainmap();
-            if (g != null) {
-                gainmapContents = g.getGainmapContents();
-                meta = toGainmapMeta(g);
-            }
-        }
-        File out = null;
-        try {
-            out = File.createTempFile("cmp_", ".avif", ctx.getCacheDir());
-            byte[] exifTiff = embedExif ? buildExifTiffBlock(readSourceExif(source)) : null;
-            boolean ok = NativeCodecs.encodeAvif(base, gainmapContents, meta, quality, exifTiff, out);
-            if (!ok) {
-                out.delete();
-                return null;
-            }
-            return out;
-        } catch (IOException e) {
-            if (out != null) out.delete();
-            return null;
-        } finally {
-            base.recycle();
-        }
-    }
-
-    /**
-     * Full-flavor JPEG path: encodes with jpegli and, when the source carries a UltraHDR gain map,
-     * produces a JPEG_R (JPEG + gainmap stitched via MPF) with EXIF embedded during encode so the
-     * MPF offsets are not disturbed by post-encode ExifInterface writes. Falls back to plain JPEG
-     * with normal EXIF re-injection when no gain map is present.
-     */
-    private File compressJpegNative(Uri source, int quality, int maxLongSide, boolean embedExif) {
-        Bitmap base = decodeOriented(source, maxLongSide);
-        if (base == null) return null;
-        File out = null;
-        try {
-            out = File.createTempFile("cmp_", ".jpg", ctx.getCacheDir());
-            // Attempt JPEG_R when the decoded bitmap carries a UltraHDR gain map.
-            if (Sdk.atLeastBaklava() && base.hasGainmap()) {
-                Gainmap g = base.getGainmap();
-                if (g != null) {
-                    Bitmap gainmapContents = g.getGainmapContents();
-                    if (gainmapContents != null) {
-                        GainmapMeta meta = toGainmapMeta(g);
-                        byte[] exifTiff = embedExif ? buildExifTiffBlock(readSourceExif(source)) : null;
-                        boolean ok = NativeCodecs.encodeJpegR(base, gainmapContents, meta,
-                                quality, exifTiff, out);
-                        if (ok) return out;
-                        // Fall through to plain JPEG if JPEG_R encoding fails.
-                    }
-                }
-            }
-            // Plain JPEG: encode then re-inject EXIF via ExifInterface.
-            boolean ok = NativeCodecs.encodeJpeg(base, quality, out);
-            if (!ok) {
-                out.delete();
-                return null;
-            }
-            if (embedExif) reinjectExif(source, out);
-            return out;
-        } catch (IOException e) {
-            if (out != null) out.delete();
-            return null;
-        } finally {
-            base.recycle();
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-    private static GainmapMeta toGainmapMeta(Gainmap g) {
-        GainmapMeta m = new GainmapMeta();
-        m.ratioMin = g.getRatioMin();
-        m.ratioMax = g.getRatioMax();
-        m.gamma = g.getGamma();
-        m.epsilonSdr = g.getEpsilonSdr();
-        m.epsilonHdr = g.getEpsilonHdr();
-        m.displayRatioSdr = g.getMinDisplayRatioForHdrTransition();
-        m.displayRatioHdr = g.getDisplayRatioForFullHdr();
-        return m;
-    }
-
-    /** Reads the source's EXIF, or null if it can't be opened. */
-    private ExifInterface readSourceExif(Uri source) {
-        try (InputStream in = repo.openOriginalForExif(source)) {
-            return new ExifInterface(in);
-        } catch (Exception e) {
-            return null;
-        }
+        if (out != null) out.delete();
+        return null;
     }
 
     /**
@@ -395,25 +237,66 @@ public class Recompressor {
 
     // ---- Encoding -----------------------------------------------------------
 
-    /** @param heifExif Exif block ("Exif\0\0" + TIFF) for HEIC/AVIF, or null; ignored otherwise. */
-    private boolean encodeBitmap(Bitmap bmp, CompressMode mode, int quality, byte[] heifExif,
-                                 File out) {
-        if (mode == CompressMode.WEBP) {
-            try (FileOutputStream fos = new FileOutputStream(out)) {
-                return encodeWebp(bmp, quality, fos);
-            } catch (IOException e) {
-                return false;
+    /**
+     * Encodes {@code bmp} into {@code out}. When {@code exifSource} is non-null its metadata is
+     * carried over: embedded during encode where the encoder takes it (libavif, JPEG_R, HEIF
+     * writers), otherwise written into the finished WebP/JPEG with ExifInterface.
+     */
+    private boolean encode(Bitmap bmp, CompressMode mode, int quality, Uri exifSource, File out)
+            throws IOException {
+        switch (mode) {
+            case WEBP:
+                try (FileOutputStream fos = new FileOutputStream(out)) {
+                    if (!encodeWebp(bmp, quality, fos)) return false;
+                }
+                break;
+            case AVIF:
+                // Full flavor: libavif keeps the UltraHDR gain map and embeds the TIFF block itself.
+                if (NativeCodecs.avifAvailable()) {
+                    Gainmap g = gainmap(bmp);
+                    return NativeCodecs.encodeAvif(bmp, g != null ? g.getGainmapContents() : null,
+                            g != null ? toGainmapMeta(g) : null, quality, exifTiff(exifSource), out);
+                }
+                // fall through: lite / no libavif → Android 16+ platform AV1 encoder.
+            case HEIC:
+                return encodeHeif(bmp, mode == CompressMode.AVIF, quality,
+                        exifBlock(exifTiff(exifSource)), out);
+            case JPEG: {
+                // Full flavor: a source with an UltraHDR gain map becomes a JPEG_R (JPEG + gain map
+                // stitched via MPF). EXIF is embedded during encode so post-encode ExifInterface
+                // writes can't disturb the MPF offsets. Falls back to plain JPEG on failure.
+                Gainmap g = gainmap(bmp);
+                if (g != null && g.getGainmapContents() != null
+                        && NativeCodecs.encodeJpegR(bmp, g.getGainmapContents(), toGainmapMeta(g),
+                                quality, exifTiff(exifSource), out)) {
+                    return true;
+                }
+                if (!NativeCodecs.encodeJpeg(bmp, quality, out)) return false;
+                break;
             }
-        } else if (mode == CompressMode.HEIC) {
-            return encodeHeic(bmp, quality, heifExif, out);
-        } else if (mode == CompressMode.AVIF) {
-            // Reached only when libavif isn't bundled (lite, Android 16+ platform encoder); the
-            // full flavor routes AVIF through compressAvifNative before this point.
-            return encodeAvif(bmp, quality, heifExif, out);
-        } else if (mode == CompressMode.JPEG) {
-            return NativeCodecs.encodeJpeg(bmp, quality, out);
+            default:
+                return false;
         }
-        return false;
+        if (exifSource != null) reinjectExif(exifSource, out);
+        return true;
+    }
+
+    /** The bitmap's UltraHDR gain map, or null. Gain maps only decode on Android 16+. */
+    private static Gainmap gainmap(Bitmap bmp) {
+        return Sdk.atLeastBaklava() && bmp.hasGainmap() ? bmp.getGainmap() : null;
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private static GainmapMeta toGainmapMeta(Gainmap g) {
+        GainmapMeta m = new GainmapMeta();
+        m.ratioMin = g.getRatioMin();
+        m.ratioMax = g.getRatioMax();
+        m.gamma = g.getGamma();
+        m.epsilonSdr = g.getEpsilonSdr();
+        m.epsilonHdr = g.getEpsilonHdr();
+        m.displayRatioSdr = g.getMinDisplayRatioForHdrTransition();
+        m.displayRatioHdr = g.getDisplayRatioForFullHdr();
+        return m;
     }
 
     /** WEBP encode to any sink — used for both temp-file output and size-only counting. */
@@ -423,68 +306,41 @@ public class Recompressor {
         return bmp.compress(fmt, quality, os);
     }
 
-    private boolean encodeHeic(Bitmap src, int quality, byte[] exif, File out) {
-        if (!Sdk.atLeastP()) return false;
-        // HEVC encoders require even dimensions.
+    /**
+     * HEIC via HeifWriter (API 28+) or AVIF via AvifWriter (Android 16+ platform AV1 encoder).
+     * @param exif Exif block ("Exif\0\0" + TIFF) the muxer stores as the image's Exif item, or null.
+     */
+    private boolean encodeHeif(Bitmap src, boolean avif, int quality, byte[] exif, File out) {
+        if (avif ? !Sdk.atLeastBaklava() : !Sdk.atLeastP()) return false;
+        // HEVC/AV1 encoders require even dimensions.
+        int w = Math.max(2, src.getWidth() & ~1);
+        int h = Math.max(2, src.getHeight() & ~1);
+        String path = out.getAbsolutePath();
         Bitmap bmp = src;
-        int w = src.getWidth() & ~1;
-        int h = src.getHeight() & ~1;
-        if (w != src.getWidth() || h != src.getHeight()) {
-            bmp = Bitmap.createBitmap(src, 0, 0, Math.max(2, w), Math.max(2, h));
-        }
-        HeifWriter writer = null;
         try {
-            writer = new HeifWriter.Builder(
-                    out.getAbsolutePath(), bmp.getWidth(), bmp.getHeight(), HeifWriter.INPUT_MODE_BITMAP)
-                    .setQuality(quality)
-                    .setMaxImages(1)
-                    .build();
-            writer.start();
-            writer.addBitmap(bmp);
-            if (exif != null) {
-                try { writer.addExifData(0, exif, 0, exif.length); } catch (Exception ignore) {}
+            if (w != src.getWidth() || h != src.getHeight()) bmp = Bitmap.createBitmap(src, 0, 0, w, h);
+            // The writers share a base class, but its methods are package-private there.
+            if (avif) {
+                try (AvifWriter writer = new AvifWriter.Builder(path, w, h, AvifWriter.INPUT_MODE_BITMAP)
+                        .setQuality(quality).setMaxImages(1).build()) {
+                    writer.start();
+                    writer.addBitmap(bmp);
+                    if (exif != null) writer.addExifData(0, exif, 0, exif.length);
+                    writer.stop(ENCODE_TIMEOUT_US);
+                }
+            } else {
+                try (HeifWriter writer = new HeifWriter.Builder(path, w, h, HeifWriter.INPUT_MODE_BITMAP)
+                        .setQuality(quality).setMaxImages(1).build()) {
+                    writer.start();
+                    writer.addBitmap(bmp);
+                    if (exif != null) writer.addExifData(0, exif, 0, exif.length);
+                    writer.stop(ENCODE_TIMEOUT_US);
+                }
             }
-            writer.stop(ENCODE_TIMEOUT_US);
             return out.length() > 0;
         } catch (Exception e) {
             return false;
         } finally {
-            if (writer != null) {
-                try { writer.close(); } catch (Exception ignore) {}
-            }
-            if (bmp != src) bmp.recycle();
-        }
-    }
-
-    private boolean encodeAvif(Bitmap src, int quality, byte[] exif, File out) {
-        if (!Sdk.atLeastBaklava()) return false;
-        // AV1 encoders require even dimensions.
-        Bitmap bmp = src;
-        int w = src.getWidth() & ~1;
-        int h = src.getHeight() & ~1;
-        if (w != src.getWidth() || h != src.getHeight()) {
-            bmp = Bitmap.createBitmap(src, 0, 0, Math.max(2, w), Math.max(2, h));
-        }
-        AvifWriter writer = null;
-        try {
-            writer = new AvifWriter.Builder(
-                    out.getAbsolutePath(), bmp.getWidth(), bmp.getHeight(), AvifWriter.INPUT_MODE_BITMAP)
-                    .setQuality(quality)
-                    .setMaxImages(1)
-                    .build();
-            writer.start();
-            writer.addBitmap(bmp);
-            if (exif != null) {
-                try { writer.addExifData(0, exif, 0, exif.length); } catch (Exception ignore) {}
-            }
-            writer.stop(ENCODE_TIMEOUT_US);
-            return out.length() > 0;
-        } catch (Exception e) {
-            return false;
-        } finally {
-            if (writer != null) {
-                try { writer.close(); } catch (Exception ignore) {}
-            }
             if (bmp != src) bmp.recycle();
         }
     }
@@ -519,36 +375,60 @@ public class Recompressor {
             ExifInterface.TAG_XMP,
     };
 
+    /** Reads the source's EXIF, or null if it can't be opened. */
+    private ExifInterface readSourceExif(Uri source) {
+        try (InputStream in = repo.openOriginalForExif(source)) {
+            return new ExifInterface(in);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Copies {@link #COPY_TAGS} (XMP only when {@code withXmp}) and records normal orientation, since
+     * pixels were normalized upright on decode. @return whether any source tag was present.
+     */
+    private static boolean copyTags(ExifInterface src, ExifInterface dst, boolean withXmp) {
+        boolean any = false;
+        for (String tag : COPY_TAGS) {
+            if (!withXmp && ExifInterface.TAG_XMP.equals(tag)) continue;
+            String v = src.getAttribute(tag);
+            if (v != null) {
+                dst.setAttribute(tag, v);
+                any = true;
+            }
+        }
+        dst.setAttribute(ExifInterface.TAG_ORIENTATION,
+                String.valueOf(ExifInterface.ORIENTATION_NORMAL));
+        return any;
+    }
+
     /**
      * Copies EXIF/GPS/XMP from source into a WebP or JPEG output, which ExifInterface writes
      * directly. Best effort — the recompressed pixels are valid even if metadata fails.
      */
     private void reinjectExif(Uri source, File out) {
+        ExifInterface src = readSourceExif(source);
+        if (src == null) return;
         try {
-            ExifInterface srcExif;
-            try (InputStream in = repo.openOriginalForExif(source)) {
-                srcExif = new ExifInterface(in);
-            }
             ExifInterface dst = new ExifInterface(out.getAbsolutePath());
-            for (String tag : COPY_TAGS) {
-                String v = srcExif.getAttribute(tag);
-                if (v != null) dst.setAttribute(tag, v);
-            }
-            // Pixels were normalized upright on decode → record normal orientation.
-            dst.setAttribute(ExifInterface.TAG_ORIENTATION,
-                    String.valueOf(ExifInterface.ORIENTATION_NORMAL));
+            copyTags(src, dst, true);
             dst.saveAttributes();
         } catch (Exception ignore) {
             // Best effort; the recompressed pixels are still valid without metadata.
         }
     }
 
+    /** {@link #buildExifTiffBlock} for {@code source}, or null when there is no source. */
+    private byte[] exifTiff(Uri source) {
+        return source == null ? null : buildExifTiffBlock(readSourceExif(source));
+    }
+
     /**
-     * Exif block in the form HeifWriter/AvifWriter.addExifData expects: "Exif\0\0" followed by the
-     * TIFF header. Null if there was nothing to write or extraction failed.
+     * Wraps a TIFF block in the form HeifWriter/AvifWriter.addExifData expects: "Exif\0\0" followed
+     * by the TIFF header. Null in, null out.
      */
-    private byte[] buildHeifExif(ExifInterface srcExif) {
-        byte[] tiff = buildExifTiffBlock(srcExif);
+    private static byte[] exifBlock(byte[] tiff) {
         if (tiff == null) return null;
         byte[] block = new byte[6 + tiff.length];
         block[0] = 'E'; block[1] = 'x'; block[2] = 'i'; block[3] = 'f'; // block[4..5] stay 0
@@ -558,8 +438,9 @@ public class Recompressor {
 
     /**
      * Produces the raw TIFF/Exif block (starting with the "II"/"MM" byte order marker) carrying the
-     * copied tags with orientation normalized. libavif and JPEG_R embed this directly; HEIF writers
-     * get it with an "Exif\0\0" prefix. Returns null if there was nothing to write or extraction failed.
+     * copied tags with orientation normalized, by letting ExifInterface write them into a throwaway
+     * 1x1 JPEG and lifting the APP1 block back out. libavif and JPEG_R embed this directly; HEIF
+     * writers get it via {@link #exifBlock}. Null if there was nothing to write or extraction failed.
      */
     private byte[] buildExifTiffBlock(ExifInterface srcExif) {
         if (srcExif == null) return null;
@@ -573,20 +454,9 @@ public class Recompressor {
                 one.recycle();
             }
             ExifInterface dst = new ExifInterface(tmp.getAbsolutePath());
-            boolean any = false;
-            for (String tag : COPY_TAGS) {
-                if (ExifInterface.TAG_XMP.equals(tag)) continue; // XMP is not part of the Exif TIFF block.
-                String v = srcExif.getAttribute(tag);
-                if (v != null) {
-                    dst.setAttribute(tag, v);
-                    any = true;
-                }
-            }
-            // Pixels were normalized upright on decode → record normal orientation.
-            dst.setAttribute(ExifInterface.TAG_ORIENTATION,
-                    String.valueOf(ExifInterface.ORIENTATION_NORMAL));
+            // XMP is not part of the Exif TIFF block.
+            if (!copyTags(srcExif, dst, false)) return null;
             dst.saveAttributes();
-            if (!any) return null;
             return extractExifTiff(readAll(tmp));
         } catch (Exception e) {
             return null;

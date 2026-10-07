@@ -198,15 +198,15 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         });
 
         // HEIC only when the device can encode it.
-        if (!Recompressor.hasHeicEncoder()) {
+        if (!Recompressor.canEncode(CompressMode.HEIC)) {
             radioHeic.setVisibility(View.GONE);
         }
         // AVIF: Android 16+ platform encoder, or the full flavor's bundled libavif on any version.
-        if (!Recompressor.hasAvifEncoder()) {
+        if (!Recompressor.canEncode(CompressMode.AVIF)) {
             radioAvif.setVisibility(View.GONE);
         }
         // JPEG only in the full flavor (jpegli is bundled there).
-        if (!Recompressor.hasJpegliEncoder()) {
+        if (!Recompressor.canEncode(CompressMode.JPEG)) {
             radioJpeg.setVisibility(View.GONE);
         }
         // Favorites skip only on Android 11+.
@@ -350,13 +350,13 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
 
     private void applySavedSettings() {
         CompressMode mode = settings.getMode();
-        if (mode == CompressMode.HEIC && !Recompressor.hasHeicEncoder()) {
+        if (mode == CompressMode.HEIC && !Recompressor.canEncode(CompressMode.HEIC)) {
             mode = CompressMode.NONE;
         }
-        if (mode == CompressMode.AVIF && !Recompressor.hasAvifEncoder()) {
+        if (mode == CompressMode.AVIF && !Recompressor.canEncode(CompressMode.AVIF)) {
             mode = CompressMode.NONE;
         }
-        if (mode == CompressMode.JPEG && !Recompressor.hasJpegliEncoder()) {
+        if (mode == CompressMode.JPEG && !Recompressor.canEncode(CompressMode.JPEG)) {
             mode = CompressMode.NONE;
         }
         switch (mode) {

@@ -18,12 +18,6 @@ import java.util.concurrent.Future;
 public final class SizeEstimator {
     private SizeEstimator() {}
 
-    /** Coarse fallbacks (bytes per megapixel) used when on-device calibration is unavailable. */
-    public static final double WEBP_BYTES_PER_MP = 0.22 * 1024 * 1024;
-    public static final double HEIC_BYTES_PER_MP = 0.12 * 1024 * 1024;
-    public static final double AVIF_BYTES_PER_MP = 0.10 * 1024 * 1024;
-    public static final double JPEG_BYTES_PER_MP = 0.30 * 1024 * 1024;
-
     private static final int SAMPLE_COUNT = 4;
 
     /**
@@ -75,8 +69,8 @@ public final class SizeEstimator {
     /** Sample-encodes a spread of images to derive bytes-per-megapixel for the chosen format. */
     public static double calibrateRatio(List<MediaImage> images, CompressMode mode, int quality,
                                         Recompressor rc, Cancel cancel) {
-        if (images == null || images.isEmpty()) return defaultRatio(mode);
-        if (cancel != null && cancel.cancelled()) return defaultRatio(mode);
+        if (images == null || images.isEmpty()) return mode.defaultBytesPerMp;
+        if (cancel != null && cancel.cancelled()) return mode.defaultBytesPerMp;
 
         // Pick up to SAMPLE_COUNT evenly-spaced images with positive megapixels.
         int n = Math.min(SAMPLE_COUNT, images.size());
@@ -86,7 +80,7 @@ public final class SizeEstimator {
             MediaImage img = images.get(i);
             if (img.megapixels() > 0) samples.add(img);
         }
-        if (samples.isEmpty()) return defaultRatio(mode);
+        if (samples.isEmpty()) return mode.defaultBytesPerMp;
 
         // Encode the samples in parallel at the reduced calibration resolution, on background-
         // priority threads so calibration never competes with the UI for big cores.
@@ -115,7 +109,7 @@ public final class SizeEstimator {
                     sumMp += r[1];
                 }
             }
-            return sumMp > 0 ? sumBytes / sumMp : defaultRatio(mode);
+            return sumMp > 0 ? sumBytes / sumMp : mode.defaultBytesPerMp;
         } finally {
             pool.shutdownNow();
         }
@@ -147,14 +141,5 @@ public final class SizeEstimator {
             est += e;
         }
         return est;
-    }
-
-    public static double defaultRatio(CompressMode mode) {
-        switch (mode) {
-            case HEIC: return HEIC_BYTES_PER_MP;
-            case AVIF: return AVIF_BYTES_PER_MP;
-            case JPEG: return JPEG_BYTES_PER_MP;
-            default: return WEBP_BYTES_PER_MP;
-        }
     }
 }

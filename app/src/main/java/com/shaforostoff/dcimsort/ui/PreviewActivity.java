@@ -263,7 +263,7 @@ public class PreviewActivity extends Activity {
             return;
         }
         // Reuse the ratio the main screen already calibrated; no re-encoding here.
-        double ratio = estimateRatio > 0 ? estimateRatio : SizeEstimator.defaultRatio(mode);
+        double ratio = estimateRatio > 0 ? estimateRatio : mode.defaultBytesPerMp;
         for (PlanFolder pf : list) {
             pf.estBytes = SizeEstimator.estimateWithRatio(
                     pf.images, ratio, mode, skipFav, skipLowGain, minGainPercent);

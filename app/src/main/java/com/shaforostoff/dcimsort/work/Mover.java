@@ -190,7 +190,7 @@ public class Mover {
     private boolean publishViaMediaStore(MediaImage img, File temp, CompressMode mode,
                                          String sourceRel, String folder, String volumeName) {
         String newRel = insertableRelativePath(sourceRel, folder);
-        String newName = baseName(img.displayName) + Recompressor.extensionFor(mode);
+        String newName = baseName(img.displayName) + mode.extension;
         Uri origUri = img.contentUri();
 
         // Overwrite the original row in-place so the MediaStore row ID is preserved.
@@ -224,7 +224,7 @@ public class Mover {
                     ContentValues doneCv = new ContentValues();
                     doneCv.put(MediaStore.MediaColumns.IS_PENDING, 0);
                     doneCv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
-                    doneCv.put(MediaStore.MediaColumns.MIME_TYPE, Recompressor.mimeFor(mode));
+                    doneCv.put(MediaStore.MediaColumns.MIME_TYPE, mode.mime);
                     doneCv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
                     doneCv.put(MediaStore.MediaColumns.SIZE, temp.length());
                     resolver().update(origUri, doneCv, null, null);
@@ -252,7 +252,7 @@ public class Mover {
 
     private boolean publishViaMediaStoreInsert(MediaImage img, File temp, CompressMode mode,
                                                String newRel, String newName, String volumeName) {
-        Uri newUri = insertPending(img, newName, Recompressor.mimeFor(mode), newRel, volumeName, "INS");
+        Uri newUri = insertPending(img, newName, mode.mime, newRel, volumeName, "INS");
         if (newUri == null) return false;
 
         journal.begin(img.id, newUri);
@@ -317,9 +317,9 @@ public class Mover {
         if (folder == null) return false;
         boolean recompress = recompressedTemp != null;
         String newRel = insertableRelativePath(sourceRel, folder);
-        String mime = recompress ? Recompressor.mimeFor(mode)
+        String mime = recompress ? mode.mime
                 : (img.mimeType != null ? img.mimeType : "image/jpeg");
-        String ext = recompress ? Recompressor.extensionFor(mode) : extensionFromName(img.displayName);
+        String ext = recompress ? mode.extension : extensionFromName(img.displayName);
         String newName = baseName(img.displayName) + ext;
 
         Uri newUri = insertPending(img, newName, mime, newRel, volumeName, "CPY");
@@ -365,7 +365,7 @@ public class Mover {
         if (parent == null) return false;
         File destDir = new File(parent, folder);
         if (!destDir.exists() && !destDir.mkdirs()) return false;
-        File dst = uniqueFile(destDir, baseName(srcFile.getName()) + Recompressor.extensionFor(mode));
+        File dst = uniqueFile(destDir, baseName(srcFile.getName()) + mode.extension);
         File tmp = new File(destDir, "." + dst.getName() + ".tmp");
         try {
             Io.copyFile(temp, tmp);

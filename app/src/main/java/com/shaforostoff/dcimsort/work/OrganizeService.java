@@ -121,11 +121,7 @@ public class OrganizeService extends Service {
         Mover mover = new Mover(this, journal);
         Recompressor rc = new Recompressor(this, repo);
 
-        // HEIC/AVIF are codec-heavy; JPEG via the full flavor's jpegli encoder is CPU-bound too.
-        boolean heavy = req.mode == com.shaforostoff.dcimsort.data.CompressMode.HEIC
-                || req.mode == com.shaforostoff.dcimsort.data.CompressMode.AVIF
-                || req.mode == com.shaforostoff.dcimsort.data.CompressMode.JPEG;
-        int workers = ThreadPlanner.workerCount(this, heavy);
+        int workers = ThreadPlanner.workerCount(this, req.mode.heavyEncode);
 
         ThreadPoolExecutor pool = new ThreadPoolExecutor(
                 workers, workers, 0L, TimeUnit.MILLISECONDS,
