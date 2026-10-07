@@ -6,7 +6,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
-import android.view.WindowInsets;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -15,7 +14,6 @@ import com.shaforostoff.dcimsort.R;
 import com.shaforostoff.dcimsort.data.Bucket;
 import com.shaforostoff.dcimsort.data.MediaRepository;
 import com.shaforostoff.dcimsort.data.SettingsStore;
-import com.shaforostoff.dcimsort.util.Sdk;
 import com.shaforostoff.dcimsort.util.SystemBars;
 
 import java.util.ArrayList;
@@ -117,14 +115,10 @@ public class FolderPickerActivity extends Activity {
                     Bucket b = getItem(position);
                     TextView t1 = v.findViewById(android.R.id.text1);
                     TextView t2 = v.findViewById(android.R.id.text2);
-                    String label = b.displayName;
-                    if (b.volumeName != null && !"external_primary".equals(b.volumeName)) {
-                        label = label + " (SD)";
-                    }
-                    t1.setText(label);
-                    String path = b.relativePath != null ? b.relativePath
-                            : (b.dataDir != null ? b.dataDir : "");
-                    t2.setText(getString(R.string.photos_count_only, b.count) + "  ·  " + path);
+                    t1.setText(b.isOnSd() ? b.displayName + " (SD)" : b.displayName);
+                    String path = b.path();
+                    t2.setText(getString(R.string.photos_count_only, b.count) + "  ·  "
+                            + (path != null ? path : ""));
                     return v;
                 }
             };
@@ -140,10 +134,8 @@ public class FolderPickerActivity extends Activity {
     }
 
     private static String alphaKey(Bucket b) {
-        boolean isSd = b.volumeName != null && !"external_primary".equals(b.volumeName);
-        String path = b.relativePath != null ? b.relativePath
-                : (b.dataDir != null ? b.dataDir : b.displayName);
-        return (isSd ? "1" : "0") + path;
+        String path = b.path();
+        return (b.isOnSd() ? "1" : "0") + (path != null ? path : b.displayName);
     }
 
     @Override

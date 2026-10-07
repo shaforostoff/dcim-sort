@@ -4,7 +4,6 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Environment;
 import android.provider.MediaStore;
 import android.text.TextUtils;
 
@@ -15,7 +14,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,8 +73,7 @@ public class MediaRepository {
         proj.add(MediaStore.MediaColumns.DATA);
 
         // Key: bucketId + ":" + volumeName to distinguish same-name folders on different volumes.
-        Map<String, int[]> counts = new LinkedHashMap<>();
-        Map<String, Bucket> meta = new LinkedHashMap<>();
+        Map<String, Bucket> buckets = new LinkedHashMap<>();
 
         try (Cursor c = resolver().query(IMAGES, proj.toArray(new String[0]), null, null, null)) {
             if (c == null) return new ArrayList<>();
@@ -90,10 +87,8 @@ public class MediaRepository {
                 long id = c.getLong(iId);
                 String vol = iVol >= 0 ? c.getString(iVol) : null;
                 String key = id + ":" + vol;
-                int[] cnt = counts.get(key);
-                if (cnt == null) {
-                    cnt = new int[]{0};
-                    counts.put(key, cnt);
+                Bucket b = buckets.get(key);
+                if (b == null) {
                     String name = iName >= 0 ? c.getString(iName) : null;
                     String rel = iRel >= 0 ? c.getString(iRel) : null;
                     String data = iData >= 0 ? c.getString(iData) : null;
@@ -101,23 +96,17 @@ public class MediaRepository {
                     if (TextUtils.isEmpty(name)) {
                         name = rel != null ? rel : (dir != null ? new File(dir).getName() : "?");
                     }
-                    meta.put(key, new Bucket(id, name, rel, dir, 0, vol));
+                    b = new Bucket(id, name, rel, dir, 0, vol);
+                    buckets.put(key, b);
                 }
-                cnt[0]++;
+                b.count++;
             }
         } catch (Exception e) {
             return new ArrayList<>();
         }
 
-        List<Bucket> out = new ArrayList<>();
-        for (Map.Entry<String, Bucket> e : meta.entrySet()) {
-            Bucket b = e.getValue();
-            int n = counts.get(e.getKey())[0];
-            out.add(new Bucket(b.id, b.displayName, b.relativePath, b.dataDir, n, b.volumeName));
-        }
-        Collections.sort(out, new Comparator<Bucket>() {
-            @Override public int compare(Bucket a, Bucket b) { return Integer.compare(b.count, a.count); }
-        });
+        List<Bucket> out = new ArrayList<>(buckets.values());
+        Collections.sort(out, (a, b) -> Integer.compare(b.count, a.count));
         return out;
     }
 
@@ -137,19 +126,13 @@ public class MediaRepository {
         for (Bucket b : buckets) {
             if (b.dataDir != null && b.dataDir.replace('\\', '/').endsWith("/DCIM/Camera")) return b;
         }
-        // 3) Default DCIM path derived directly.
-        File dcimCamera = new File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera");
-        for (Bucket b : buckets) {
-            if (b.dataDir != null && new File(b.dataDir).equals(dcimCamera)) return b;
-        }
-        // 4) Largest bucket under DCIM.
+        // 3) Largest bucket under DCIM.
         for (Bucket b : buckets) {
             boolean inDcim = (b.relativePath != null && b.relativePath.startsWith("DCIM/"))
                     || (b.dataDir != null && b.dataDir.replace('\\', '/').contains("/DCIM/"));
             if (inDcim) return b; // list is already sorted by count desc
         }
-        // 5) Fall back to the largest bucket overall.
+        // 4) Fall back to the largest bucket overall.
         return buckets.isEmpty() ? null : buckets.get(0);
     }
 
@@ -255,9 +238,12 @@ public class MediaRepository {
             } catch (Exception ignore) {}
         }
         Sel sel = folderSelection(relativePath, dataDir);
+        query(baseUri, sel.where, sel.args, cb);
+    }
 
-        try (Cursor c = resolver().query(baseUri, PROJECTION, sel.where, sel.args,
-                SORT_NEWEST_FIRST)) {
+    /** Shared image query: applies {@code where}/{@code args}, newest first, one row per callback. */
+    private void query(Uri uri, String where, String[] args, RowCallback cb) {
+        try (Cursor c = resolver().query(uri, PROJECTION, where, args, SORT_NEWEST_FIRST)) {
             if (c == null) return;
             Cols k = new Cols(c);
             Interner interner = new Interner();
@@ -265,21 +251,20 @@ public class MediaRepository {
                 if (!cb.onImage(readRow(c, k, interner))) return;
             }
         } catch (Exception ignore) {
-            // Treat query failures as an empty/partial folder.
+            // Treat query failures as an empty/partial result.
         }
     }
 
     // ---- Fetch by picked URIs / ID list ------------------------------------
 
     /**
-     * Resolves photo-picker / document URIs to on-device MediaStore rows.
+     * Resolves photo-picker / document URIs to images.
      *
      * <p>Picker URIs come in two shapes: ones carrying the MediaStore {@code _ID} (photo picker
      * local items {@code .../photopicker/media/1234}, DocumentsProvider {@code .../document/image:1234}),
      * and opaque ones with no usable id (Google Photos cloud picker
-     * {@code .../cloudpicker/media/<uuid>}). The first kind is looked up by id; the second is matched
-     * to a local row by display name + size. Cloud-only photos that aren't on the device have no
-     * MediaStore row and are silently dropped — they can't be moved or recompressed anyway.
+     * {@code .../cloudpicker/media/<uuid>}). The first kind is looked up by id; the second becomes a
+     * copy-only image that keeps its source URI (see {@link #pickerImage}).
      */
     public List<MediaImage> fetchByUris(List<Uri> uris) {
         if (uris == null || uris.isEmpty()) return Collections.emptyList();
@@ -373,7 +358,7 @@ public class MediaRepository {
     }
 
     /** Returns MediaImage objects for the given MediaStore IDs, sorted by DATE_TAKEN DESC. */
-    public List<MediaImage> fetchByIds(List<Long> ids) {
+    private List<MediaImage> fetchByIds(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return Collections.emptyList();
         String[] placeholders = new String[ids.size()];
         String[] args = new String[ids.size()];
@@ -382,20 +367,8 @@ public class MediaRepository {
             args[i] = String.valueOf(ids.get(i));
         }
         String where = MediaStore.Images.Media._ID + " IN (" + TextUtils.join(",", placeholders) + ")";
-        return queryImages(where, args);
-    }
-
-    /** Shared image query: applies {@code where}/{@code args}, sorts newest first, builds rows. */
-    private List<MediaImage> queryImages(String where, String[] args) {
         List<MediaImage> result = new ArrayList<>();
-        try (Cursor c = resolver().query(IMAGES, PROJECTION, where, args, SORT_NEWEST_FIRST)) {
-            if (c == null) return result;
-            Cols k = new Cols(c);
-            Interner interner = new Interner();
-            while (c.moveToNext()) {
-                result.add(readRow(c, k, interner));
-            }
-        } catch (Exception ignore) {}
+        query(IMAGES, where, args, result::add);
         return result;
     }
 
