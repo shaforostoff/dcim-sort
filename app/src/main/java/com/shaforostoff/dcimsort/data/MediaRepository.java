@@ -406,15 +406,16 @@ public class MediaRepository {
      * so GPS survives (requires ACCESS_MEDIA_LOCATION). Caller closes the stream.
      */
     public InputStream openOriginalForExif(Uri uri) throws IOException {
-        Uri toOpen = uri;
         if (Sdk.atLeastQ()) {
             try {
-                toOpen = MediaStore.setRequireOriginal(uri);
+                InputStream in = resolver().openInputStream(MediaStore.setRequireOriginal(uri));
+                if (in != null) return in;
             } catch (Exception ignore) {
-                toOpen = uri;
+                // Not a MediaStore item (e.g. a cloud picker URI) or ACCESS_MEDIA_LOCATION denied:
+                // fall back to the plain stream, where the provider may have redacted GPS.
             }
         }
-        InputStream in = resolver().openInputStream(toOpen);
+        InputStream in = resolver().openInputStream(uri);
         if (in == null) throw new IOException("Cannot open " + uri);
         return in;
     }

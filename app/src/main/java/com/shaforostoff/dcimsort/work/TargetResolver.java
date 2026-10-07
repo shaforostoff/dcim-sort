@@ -42,14 +42,16 @@ public class TargetResolver {
 
     /** EXIF GPS for an image, served from {@link CoordCache} when available to skip the file read. */
     private double[] coordsFor(MediaImage img) {
-        if (coords == null) {
-            return geo.latLon(img.contentUri());
+        // Picks without a MediaStore row (cloud picker) have no stable id to cache under — they
+        // all share id -1 — and their bytes are only reachable through the picker URI.
+        if (coords == null || !img.isMovable()) {
+            return geo.latLon(img.readUri());
         }
         String key = CoordCache.key(img.id, img.size, img.dateTakenMillis);
         if (coords.contains(key)) {
             return coords.get(key);
         }
-        double[] ll = geo.latLon(img.contentUri());
+        double[] ll = geo.latLon(img.readUri());
         coords.put(key, ll);
         return ll;
     }
