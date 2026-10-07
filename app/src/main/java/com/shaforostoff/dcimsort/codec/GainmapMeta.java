@@ -1,5 +1,7 @@
 package com.shaforostoff.dcimsort.codec;
 
+import android.graphics.Bitmap;
+
 /**
  * Plain holder for UltraHDR gain-map metadata, decoupled from {@code android.graphics.Gainmap}
  * (API 34+) so it can live in the shared {@code main} source set and be passed to the
@@ -9,6 +11,8 @@ package com.shaforostoff.dcimsort.codec;
  * <p>Each per-channel array holds {R, G, B}. Values mirror {@code android.graphics.Gainmap}.
  */
 public final class GainmapMeta {
+    /** The gain-map contents bitmap (may be null); Java-side only, handed to native separately. */
+    public Bitmap contents;
     public float[] ratioMin = {1f, 1f, 1f};
     public float[] ratioMax = {2f, 2f, 2f};
     public float[] gamma = {1f, 1f, 1f};

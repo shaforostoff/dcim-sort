@@ -253,9 +253,9 @@ public class Recompressor {
             case AVIF:
                 // Full flavor: libavif keeps the UltraHDR gain map and embeds the TIFF block itself.
                 if (NativeCodecs.avifAvailable()) {
-                    Gainmap g = gainmap(bmp);
-                    return NativeCodecs.encodeAvif(bmp, g != null ? g.getGainmapContents() : null,
-                            g != null ? toGainmapMeta(g) : null, quality, exifTiff(exifSource), out);
+                    GainmapMeta gm = gainmap(bmp);
+                    return NativeCodecs.encodeAvif(bmp, gm != null ? gm.contents : null, gm, quality,
+                            exifTiff(exifSource), out);
                 }
                 // fall through: lite / no libavif → Android 16+ platform AV1 encoder.
             case HEIC:
@@ -265,10 +265,9 @@ public class Recompressor {
                 // Full flavor: a source with an UltraHDR gain map becomes a JPEG_R (JPEG + gain map
                 // stitched via MPF). EXIF is embedded during encode so post-encode ExifInterface
                 // writes can't disturb the MPF offsets. Falls back to plain JPEG on failure.
-                Gainmap g = gainmap(bmp);
-                if (g != null && g.getGainmapContents() != null
-                        && NativeCodecs.encodeJpegR(bmp, g.getGainmapContents(), toGainmapMeta(g),
-                                quality, exifTiff(exifSource), out)) {
+                GainmapMeta gm = gainmap(bmp);
+                if (gm != null && gm.contents != null && NativeCodecs.encodeJpegR(
+                        bmp, gm.contents, gm, quality, exifTiff(exifSource), out)) {
                     return true;
                 }
                 if (!NativeCodecs.encodeJpeg(bmp, quality, out)) return false;
@@ -282,13 +281,16 @@ public class Recompressor {
     }
 
     /** The bitmap's UltraHDR gain map, or null. Gain maps only decode on Android 16+. */
-    private static Gainmap gainmap(Bitmap bmp) {
-        return Sdk.atLeastBaklava() && bmp.hasGainmap() ? bmp.getGainmap() : null;
+    private static GainmapMeta gainmap(Bitmap bmp) {
+        if (!Sdk.atLeastBaklava() || !bmp.hasGainmap()) return null;
+        Gainmap g = bmp.getGainmap();
+        return g != null ? toGainmapMeta(g) : null;
     }
 
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     private static GainmapMeta toGainmapMeta(Gainmap g) {
         GainmapMeta m = new GainmapMeta();
+        m.contents = g.getGainmapContents();
         m.ratioMin = g.getRatioMin();
         m.ratioMax = g.getRatioMax();
         m.gamma = g.getGamma();
