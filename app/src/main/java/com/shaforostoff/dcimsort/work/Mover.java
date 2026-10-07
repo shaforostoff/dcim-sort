@@ -83,17 +83,14 @@ public class Mover {
 
     private Outcome moveViaMediaStore(MediaImage img, String sourceRel, String folder) {
         String newRel = childRelativePath(sourceRel, folder);
-        Log.d(TAG, "move uri=" + img.contentUri() + " relPath=" + img.relativePath + " newRel=" + newRel);
         if (img.relativePath != null && img.relativePath.equalsIgnoreCase(newRel)) {
-            Log.d(TAG, "move SKIPPED (same rel path)");
             return Outcome.SKIPPED;
         }
         ContentValues cv = new ContentValues();
         cv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
         try {
-            int n = resolver().update(img.contentUri(), cv, null, null);
-            Log.d(TAG, "move update returned " + n);
-            return n > 0 ? Outcome.MOVED : Outcome.FAILED;
+            return resolver().update(img.contentUri(), cv, null, null) > 0
+                    ? Outcome.MOVED : Outcome.FAILED;
         } catch (Exception e) {
             Log.w(TAG, "move update exception", e);
             return Outcome.FAILED;
@@ -246,7 +243,6 @@ public class Mover {
                 journal.begin(img.id, origUri);
                 boolean writeOk = false;
                 try {
-                    Log.d(TAG, "OVW writing tempSize=" + temp.length());
                     Io.copyFileTo(temp, os);
                     writeOk = true;
                 } catch (Exception e) {
@@ -262,7 +258,6 @@ public class Mover {
                     doneCv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
                     doneCv.put(MediaStore.MediaColumns.SIZE, temp.length());
                     resolver().update(origUri, doneCv, null, null);
-                    Log.d(TAG,"OVW success origUri=" + origUri + " -> " + newName);
                     journal.complete(img.id);
                     return true;
                 }
