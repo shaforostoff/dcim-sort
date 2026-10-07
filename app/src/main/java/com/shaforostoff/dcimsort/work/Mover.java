@@ -105,10 +105,9 @@ public class Mover {
         File srcFile = new File(img.dataPath);
         if (!srcFile.exists()) return Outcome.FAILED;
         File parent = srcFile.getParentFile();
-        if (parent == null) return Outcome.FAILED;
-        if (parent.getName().equalsIgnoreCase(folder)) return Outcome.SKIPPED;
-        File destDir = new File(parent, folder);
-        if (!destDir.exists() && !destDir.mkdirs()) return Outcome.FAILED;
+        if (parent != null && parent.getName().equalsIgnoreCase(folder)) return Outcome.SKIPPED;
+        File destDir = legacyDestDir(srcFile, folder);
+        if (destDir == null) return Outcome.FAILED;
         File dst = uniqueFile(destDir, srcFile.getName());
         boolean ok = srcFile.renameTo(dst);
         if (!ok) {
@@ -122,6 +121,17 @@ public class Mover {
         }
         scan(srcFile.getAbsolutePath(), dst.getAbsolutePath());
         return ok ? Outcome.MOVED : Outcome.FAILED;
+    }
+
+    /**
+     * Legacy (pre-Q) destination: {@code folder} beside the original, or the original's own
+     * directory without grouping. Created if needed; null if that fails.
+     */
+    private static File legacyDestDir(File srcFile, String folder) {
+        File parent = srcFile.getParentFile();
+        if (parent == null) return null;
+        File dir = folder == null ? parent : new File(parent, folder);
+        return dir.exists() || dir.mkdirs() ? dir : null;
     }
 
     // ---- Shared MediaStore insert plumbing ---------------------------------
@@ -138,12 +148,42 @@ public class Mover {
         return newRel;
     }
 
+    private interface StreamWriter {
+        void write(OutputStream os) throws IOException;
+    }
+
+    /**
+     * Inserts a new pending image row, fills it via {@code writer}, then makes it visible and checks
+     * it has bytes. With {@code journaled} the row is journaled before writing (and aborted on
+     * failure) so a crash mid-write is rolled back. On failure the new row is deleted; returns null.
+     */
+    private Uri insertAndWrite(MediaImage img, String newName, String mime, String newRel,
+                               String volumeName, boolean journaled, StreamWriter writer) {
+        Uri newUri = insertPending(img, newName, mime, newRel, volumeName);
+        if (newUri == null) return null;
+        if (journaled) journal.begin(img.id, newUri);
+        try {
+            try (OutputStream os = resolver().openOutputStream(newUri)) {
+                if (os == null) throw new IOException("null output stream");
+                writer.write(os);
+            }
+            setPending(newUri, 0);
+            if (verify(newUri)) return newUri;
+            Log.d(TAG, "verify FAILED newUri=" + newUri);
+        } catch (Exception e) {
+            Log.d(TAG, "write failed: " + e);
+        }
+        safeDelete(newUri);
+        if (journaled) journal.abort(img.id);
+        return null;
+    }
+
     /**
      * Inserts a new pending image row on the source's storage volume, carrying over the favourite
-     * flag and description. {@code tag} only labels the log line. Returns null if the insert failed.
+     * flag and description. Returns null if the insert failed.
      */
     private Uri insertPending(MediaImage img, String newName, String mime, String newRel,
-                              String volumeName, String tag) {
+                              String volumeName) {
         ContentValues cv = new ContentValues();
         cv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
         cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
@@ -160,21 +200,17 @@ public class Mover {
             catch (Exception ignore) {}
         }
         try {
-            Uri newUri = resolver().insert(insertUri, cv);
-            if (newUri == null) Log.d(TAG, tag + " insert returned null");
-            return newUri;
+            return resolver().insert(insertUri, cv);
         } catch (Exception e) {
-            Log.d(TAG, tag + " insert threw: " + e);
+            Log.d(TAG, "insert threw: " + e);
             return null;
         }
     }
 
-    /** Clears IS_PENDING so the row becomes visible, then confirms it actually has bytes. */
-    private boolean commitAndVerify(Uri newUri) {
-        ContentValues done = new ContentValues();
-        done.put(MediaStore.MediaColumns.IS_PENDING, 0);
-        resolver().update(newUri, done, null, null);
-        return verify(newUri);
+    private void setPending(Uri uri, int pending) {
+        ContentValues cv = new ContentValues();
+        cv.put(MediaStore.MediaColumns.IS_PENDING, pending);
+        resolver().update(uri, cv, null, null);
     }
 
     // ---- Publish recompressed ----------------------------------------------
@@ -206,9 +242,7 @@ public class Mover {
             OutputStream os = resolver().openOutputStream(origUri, "rwt");
             if (os != null) {
                 // Got write access. Mark pending to hide the file from other apps during write.
-                ContentValues pendingCv = new ContentValues();
-                pendingCv.put(MediaStore.MediaColumns.IS_PENDING, 1);
-                resolver().update(origUri, pendingCv, null, null);
+                setPending(origUri, 1);
                 journal.begin(img.id, origUri);
                 boolean writeOk = false;
                 try {
@@ -233,9 +267,7 @@ public class Mover {
                     return true;
                 }
                 // Write failed; restore visibility of original file.
-                ContentValues clearCv = new ContentValues();
-                clearCv.put(MediaStore.MediaColumns.IS_PENDING, 0);
-                try { resolver().update(origUri, clearCv, null, null); } catch (Exception ignore) {}
+                try { setPending(origUri, 0); } catch (Exception ignore) {}
                 journal.abort(img.id);
                 // Fall through to insert path.
             }
@@ -252,53 +284,32 @@ public class Mover {
 
     private boolean publishViaMediaStoreInsert(MediaImage img, File temp, CompressMode mode,
                                                String newRel, String newName, String volumeName) {
-        Uri newUri = insertPending(img, newName, mode.mime, newRel, volumeName, "INS");
+        Uri newUri = insertAndWrite(img, newName, mode.mime, newRel, volumeName, true,
+                os -> Io.copyFileTo(temp, os));
         if (newUri == null) return false;
-
-        journal.begin(img.id, newUri);
-        try {
-            try (OutputStream os = resolver().openOutputStream(newUri)) {
-                if (os == null) throw new IOException("null output stream");
-                Io.copyFileTo(temp, os);
-            }
-            if (!commitAndVerify(newUri)) {
-                Log.d(TAG,"INS verify FAILED newUri=" + newUri);
-                safeDelete(newUri);
-                journal.abort(img.id);
-                return false;
-            }
-            // Try delete; fall back to IS_TRASHED=1 if delete permission was not granted.
-            boolean removed = false;
-            try {
-                int n = resolver().delete(img.contentUri(), null, null);
-                removed = (n > 0);
-                Log.d(TAG,"INS delete n=" + n + " orig=" + img.contentUri());
-            } catch (Exception e) {
-                Log.d(TAG,"INS delete threw: " + e);
-            }
-            if (!removed && Sdk.atLeastQ()) {
-                try {
-                    ContentValues trash = new ContentValues();
-                    trash.put(MediaStore.MediaColumns.IS_TRASHED, 1);
-                    int n = resolver().update(img.contentUri(), trash, null, null);
-                    removed = (n > 0);
-                    Log.d(TAG,"INS IS_TRASHED n=" + n + " orig=" + img.contentUri());
-                } catch (Exception e) {
-                    Log.d(TAG,"INS IS_TRASHED threw: " + e);
-                }
-            }
-            if (!removed) {
-                Log.d(TAG,"INS neither delete nor trash worked — rolling back newUri=" + newUri);
-                safeDelete(newUri);
-                journal.abort(img.id);
-                return false;
-            }
-            journal.complete(img.id);
-            return true;
-        } catch (Exception e) {
-            Log.d(TAG,"INS outer catch: " + e);
+        if (!removeOriginal(img.contentUri())) {
+            Log.d(TAG, "INS neither delete nor trash worked — rolling back newUri=" + newUri);
             safeDelete(newUri);
             journal.abort(img.id);
+            return false;
+        }
+        journal.complete(img.id);
+        return true;
+    }
+
+    /** Deletes the original; falls back to IS_TRASHED=1 if delete permission was not granted. */
+    private boolean removeOriginal(Uri uri) {
+        try {
+            if (resolver().delete(uri, null, null) > 0) return true;
+        } catch (Exception e) {
+            Log.d(TAG, "INS delete threw: " + e);
+        }
+        try {
+            ContentValues trash = new ContentValues();
+            trash.put(MediaStore.MediaColumns.IS_TRASHED, 1);
+            return resolver().update(uri, trash, null, null) > 0;
+        } catch (Exception e) {
+            Log.d(TAG, "INS IS_TRASHED threw: " + e);
             return false;
         }
     }
@@ -322,25 +333,11 @@ public class Mover {
         String ext = recompress ? mode.extension : extensionFromName(img.displayName);
         String newName = baseName(img.displayName) + ext;
 
-        Uri newUri = insertPending(img, newName, mime, newRel, volumeName, "CPY");
-        if (newUri == null) return false;
-        try {
-            try (OutputStream os = resolver().openOutputStream(newUri)) {
-                if (os == null) throw new IOException("null output stream");
-                if (recompress) Io.copyFileTo(recompressedTemp, os);
-                else copyFromUri(img.readUri(), os);
-            }
-            if (!commitAndVerify(newUri)) {
-                Log.d(TAG, "CPY verify FAILED newUri=" + newUri);
-                safeDelete(newUri);
-                return false;
-            }
-            return true; // original deliberately left intact
-        } catch (Exception e) {
-            Log.d(TAG, "CPY write failed: " + e);
-            safeDelete(newUri);
-            return false;
-        }
+        // The original is deliberately left intact.
+        return insertAndWrite(img, newName, mime, newRel, volumeName, false, os -> {
+            if (recompress) Io.copyFileTo(recompressedTemp, os);
+            else copyFromUri(img.readUri(), os);
+        }) != null;
     }
 
     private void copyFromUri(Uri uri, OutputStream out) throws IOException {
@@ -361,10 +358,8 @@ public class Mover {
     private boolean publishLegacy(MediaImage img, File temp, CompressMode mode, String folder) {
         if (img.dataPath == null) return false;
         File srcFile = new File(img.dataPath);
-        File parent = srcFile.getParentFile();
-        if (parent == null) return false;
-        File destDir = new File(parent, folder);
-        if (!destDir.exists() && !destDir.mkdirs()) return false;
+        File destDir = legacyDestDir(srcFile, folder);
+        if (destDir == null) return false;
         File dst = uniqueFile(destDir, baseName(srcFile.getName()) + mode.extension);
         File tmp = new File(destDir, "." + dst.getName() + ".tmp");
         try {
