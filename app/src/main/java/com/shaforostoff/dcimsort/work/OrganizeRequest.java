@@ -20,7 +20,6 @@ public class OrganizeRequest {
     public int minGainPercent = SizeEstimator.DEFAULT_MIN_GAIN_PERCENT; // saving that makes compressing worth it
     public boolean keepOriginal;        // true = import an organized copy, leave the original intact
     public String sourceRelativePath;   // e.g. "DCIM/Camera/"
-    public String sourceDataDir;        // legacy absolute dir
     public String volumeName;           // "external_primary" = internal; SD UUID; null = legacy
 
     private static volatile OrganizeRequest pending;

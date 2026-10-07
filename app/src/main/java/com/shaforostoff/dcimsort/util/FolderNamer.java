@@ -1,12 +1,10 @@
 package com.shaforostoff.dcimsort.util;
 
-import java.util.Calendar;
 import java.util.Locale;
-import java.util.TimeZone;
 
 /**
- * Builds the destination subfolder name for a photo: {@code Place-YYYY-MM} when a place is known,
- * otherwise {@code YYYY-MM}. Output is sanitized to be filesystem-safe.
+ * Builds the destination subfolder name for a photo: {@code Place-YYYY-MM} (or {@code -YYYY-MM-DD})
+ * when a place is known, otherwise just the date. Output is sanitized to be filesystem-safe.
  */
 public final class FolderNamer {
     private FolderNamer() {}
@@ -14,32 +12,14 @@ public final class FolderNamer {
     /**
      * @param dateTakenMillis epoch millis (DATE_TAKEN) of the shot; 0/negative falls back to "unknown-date".
      * @param place           resolved place name, or null/blank if unknown.
+     * @param perDay          {@code YYYY-MM-DD} instead of {@code YYYY-MM}.
      */
-    public static String folderName(long dateTakenMillis, String place) {
-        String ym = yearMonth(dateTakenMillis);
+    public static String folderName(long dateTakenMillis, String place, boolean perDay) {
+        // A Long argument formats in the default time zone.
+        String date = dateTakenMillis <= 0 ? "unknown-date" : String.format(Locale.US,
+                perDay ? "%1$tY-%1$tm-%1$td" : "%1$tY-%1$tm", dateTakenMillis);
         String safePlace = sanitize(place);
-        return safePlace == null ? ym : safePlace + "-" + ym;
-    }
-
-    public static String folderNameDay(long dateTakenMillis, String place) {
-        String ymd = yearMonthDay(dateTakenMillis);
-        String safePlace = sanitize(place);
-        return safePlace == null ? ymd : safePlace + "-" + ymd;
-    }
-
-    private static String yearMonth(long millis) {
-        if (millis <= 0) return "unknown-date";
-        Calendar c = Calendar.getInstance(TimeZone.getDefault());
-        c.setTimeInMillis(millis);
-        return String.format(Locale.US, "%04d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1);
-    }
-
-    private static String yearMonthDay(long millis) {
-        if (millis <= 0) return "unknown-date";
-        Calendar c = Calendar.getInstance(TimeZone.getDefault());
-        c.setTimeInMillis(millis);
-        return String.format(Locale.US, "%04d-%02d-%02d",
-                c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
+        return safePlace == null ? date : safePlace + "-" + date;
     }
 
     /** Returns a filesystem-safe place token, or null if the input is empty after cleaning. */

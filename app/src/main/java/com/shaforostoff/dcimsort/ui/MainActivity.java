@@ -653,7 +653,6 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         req.keepOriginal = checkKeepOriginal.isChecked();
         if (folder != null) {
             req.sourceRelativePath = folder.relativePath;
-            req.sourceDataDir = folder.dataDir;
             req.volumeName = folder.volumeName;
         }
         pendingRequest = req;
@@ -763,10 +762,10 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
         if (requestCode == REQ_PICK_FOLDER) {
             if (resultCode == RESULT_OK && data != null) {
                 setFolder(new Bucket(
-                        data.getLongExtra(Extras.RESULT_BUCKET_ID, -1),
-                        data.getStringExtra(Extras.RESULT_DISPLAY),
-                        data.getStringExtra(Extras.RESULT_REL_PATH),
-                        data.getStringExtra(Extras.RESULT_DATA_DIR),
+                        data.getLongExtra(Extras.BUCKET_ID, -1),
+                        data.getStringExtra(Extras.DISPLAY),
+                        data.getStringExtra(Extras.REL_PATH),
+                        data.getStringExtra(Extras.DATA_DIR),
                         0,
                         data.getStringExtra(Extras.VOLUME_NAME)));
             }
@@ -798,14 +797,8 @@ public class MainActivity extends Activity implements OrganizeService.Listener {
     // ---- Permissions --------------------------------------------------------
 
     private void requestNeededPermissions() {
-        List<String> req = new ArrayList<>();
-        for (String p : PermissionManager.missing(this)) req.add(p);
-        if (PermissionManager.needsNotificationPermission(this)) {
-            req.add(android.Manifest.permission.POST_NOTIFICATIONS);
-        }
-        if (!req.isEmpty()) {
-            requestPermissions(req.toArray(new String[0]), REQ_PERMISSIONS);
-        }
+        String[] missing = PermissionManager.missing(this);
+        if (missing.length > 0) requestPermissions(missing, REQ_PERMISSIONS);
     }
 
     @Override

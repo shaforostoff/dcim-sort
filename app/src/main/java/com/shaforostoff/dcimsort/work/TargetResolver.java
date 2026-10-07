@@ -46,10 +46,7 @@ public class TargetResolver {
         if (ll != null) {
             place = places.resolve(ll[0], ll[1]);
         }
-        if (groupMode == GroupMode.PLACE_DAY) {
-            return FolderNamer.folderNameDay(img.dateTakenMillis, place);
-        }
-        return FolderNamer.folderName(img.dateTakenMillis, place);
+        return FolderNamer.folderName(img.dateTakenMillis, place, groupMode == GroupMode.PLACE_DAY);
     }
 
     /** EXIF GPS for an image, served from {@link CoordCache} when available to skip the file read. */

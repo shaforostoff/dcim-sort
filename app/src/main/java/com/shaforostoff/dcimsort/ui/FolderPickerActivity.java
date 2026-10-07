@@ -57,10 +57,10 @@ public class FolderPickerActivity extends Activity {
             if (buckets == null || position >= buckets.size()) return;
             Bucket b = buckets.get(position);
             Intent result = new Intent();
-            result.putExtra(Extras.RESULT_BUCKET_ID, b.id);
-            result.putExtra(Extras.RESULT_REL_PATH, b.relativePath);
-            result.putExtra(Extras.RESULT_DATA_DIR, b.dataDir);
-            result.putExtra(Extras.RESULT_DISPLAY, b.displayName);
+            result.putExtra(Extras.BUCKET_ID, b.id);
+            result.putExtra(Extras.REL_PATH, b.relativePath);
+            result.putExtra(Extras.DATA_DIR, b.dataDir);
+            result.putExtra(Extras.DISPLAY, b.displayName);
             result.putExtra(Extras.VOLUME_NAME, b.volumeName);
             setResult(RESULT_OK, result);
             finish();
