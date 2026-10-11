@@ -5,7 +5,6 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -102,13 +101,11 @@ public class OrganizeService extends Service {
     }
 
     private void run(OrganizeRequest req) {
-        ContentResolver resolver = getContentResolver();
-
         MediaRepository repo = new MediaRepository(this);
         TargetResolver targets = new TargetResolver(this, repo, req.groupMode);
         OrganizeJournal journal = new OrganizeJournal(this);
-        journal.reconcile(resolver);
         Mover mover = new Mover(this, journal);
+        mover.recover();
         Recompressor rc = new Recompressor(this, repo);
 
         int workers = ThreadPlanner.workerCount(this, req.mode.heavyEncode);

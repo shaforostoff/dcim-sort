@@ -22,7 +22,8 @@ import java.io.OutputStream;
 /**
  * Relocates originals (lossless move) and publishes recompressed files. On 29+ uses MediaStore
  * (RELATIVE_PATH update / pending insert); on legacy uses direct file operations. The recompress
- * publish follows write→commit→verify→delete-original ordering so a stop never leaves both files.
+ * publish is journaled ({@link OrganizeJournal}) so a crash or stop never loses a photo; at worst
+ * it leaves a duplicate.
  */
 public class Mover {
     public enum Outcome { MOVED, SKIPPED, FAILED }
@@ -220,61 +221,90 @@ public class Mover {
         return publishLegacy(img, temp, mode, folder);
     }
 
+    private enum Overwrite { DONE, UNTOUCHED, DAMAGED }
+
     private boolean publishViaMediaStore(MediaImage img, File temp, CompressMode mode,
                                          String sourceRel, String folder, String volumeName) {
         String newRel = insertableRelativePath(sourceRel, folder);
         String newName = baseName(img.displayName) + mode.extension;
-        Uri origUri = img.contentUri();
 
         // Overwrite the original row in-place so the MediaStore row ID is preserved.
         // Google Photos (and other apps) key per-photo metadata (captions, edits) by row ID;
         // a delete+insert creates a new ID and permanently loses those associations.
         //
-        // IMPORTANT: open the OutputStream BEFORE setting IS_PENDING=1.
-        // MediaStore only lets the file's original owner open a pending item's stream;
-        // we must acquire the stream while the row is still non-pending.
-        try {
-            // "rwt" = read-write-truncate: guarantees the old bytes are wiped before we write.
-            // Plain "w" on some MediaStore implementations silently skips the truncation.
-            OutputStream os = resolver().openOutputStream(origUri, "rwt");
-            if (os != null) {
-                // Got write access. Mark pending to hide the file from other apps during write.
-                setPending(origUri, 1);
-                journal.begin(img.id, origUri);
-                boolean writeOk = false;
-                try {
-                    Io.copyFileTo(temp, os);
-                    writeOk = true;
-                } catch (Exception e) {
-                    Log.d(TAG,"OVW write failed: " + e);
-                } finally {
-                    try { os.close(); } catch (Exception ignore) {}
-                }
-                if (writeOk) {
-                    ContentValues doneCv = new ContentValues();
-                    doneCv.put(MediaStore.MediaColumns.IS_PENDING, 0);
-                    doneCv.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
-                    doneCv.put(MediaStore.MediaColumns.MIME_TYPE, mode.mime);
-                    doneCv.put(MediaStore.MediaColumns.RELATIVE_PATH, newRel);
-                    doneCv.put(MediaStore.MediaColumns.SIZE, temp.length());
-                    resolver().update(origUri, doneCv, null, null);
-                    journal.complete(img.id);
-                    return true;
-                }
-                // Write failed; restore visibility of original file.
-                try { setPending(origUri, 0); } catch (Exception ignore) {}
-                journal.abort(img.id);
-                // Fall through to insert path.
-            }
-        } catch (Exception e) {
-            Log.d(TAG,"OVW open failed: " + e);
-            // Fall through to insert path.
+        // The overwrite wipes the original as it starts, so the new bytes first move out of the
+        // cache dir into a journaled redo file: if we die mid-write, recover() finishes the job.
+        File redo = journal.redoFile(img.id);
+        if (!temp.renameTo(redo)) {
+            return publishViaMediaStoreInsert(img, temp, mode, newRel, newName, volumeName);
         }
+        journal.beginInPlace(img.id, img.contentUri(), newRel, newName, mode.mime);
+        Overwrite result = overwrite(img.contentUri(), redo, newRel, newName, mode.mime);
 
         // Fallback: insert a new row and delete the original.
         // Used when we cannot claim write access to the original row.
         // Note: this path loses any per-row metadata (e.g. Google Photos captions).
-        return publishViaMediaStoreInsert(img, temp, mode, newRel, newName, volumeName);
+        boolean ok = result == Overwrite.DONE
+                || publishViaMediaStoreInsert(img, redo, mode, newRel, newName, volumeName);
+        if (ok || result == Overwrite.UNTOUCHED) {
+            journal.endInPlace(img.id);
+            redo.delete();
+        }
+        // Otherwise the original is damaged and nothing replaced it: the redo file stays, and the
+        // next run's recover() writes it back.
+        return ok;
+    }
+
+    /** Rewrites an existing row's bytes from {@code src}, then renames/moves it to rel/name/mime. */
+    private Overwrite overwrite(Uri uri, File src, String rel, String name, String mime) {
+        // IMPORTANT: open the OutputStream BEFORE setting IS_PENDING=1.
+        // MediaStore only lets the file's original owner open a pending item's stream;
+        // we must acquire the stream while the row is still non-pending.
+        boolean opened = false;
+        // "rwt" = read-write-truncate: guarantees the old bytes are wiped before we write.
+        // Plain "w" on some MediaStore implementations silently skips the truncation.
+        try (OutputStream os = resolver().openOutputStream(uri, "rwt")) {
+            if (os == null) return Overwrite.UNTOUCHED;
+            opened = true;
+            setPending(uri, 1); // hide the file from other apps during the write
+            Io.copyFileTo(src, os);
+        } catch (Exception e) {
+            Log.d(TAG, "OVW failed: " + e);
+            return opened ? Overwrite.DAMAGED : Overwrite.UNTOUCHED;
+        }
+        ContentValues done = new ContentValues();
+        done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+        done.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+        done.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+        done.put(MediaStore.MediaColumns.RELATIVE_PATH, rel);
+        done.put(MediaStore.MediaColumns.SIZE, src.length());
+        try {
+            if (resolver().update(uri, done, null, null) > 0) return Overwrite.DONE;
+        } catch (Exception e) {
+            Log.d(TAG, "OVW update failed: " + e);
+        }
+        return Overwrite.DAMAGED;
+    }
+
+    /**
+     * Finishes in-place overwrites that a crash interrupted (see {@link OrganizeJournal}) and rolls
+     * back unfinished inserts. Call once per run, before any new work.
+     */
+    public void recover() {
+        for (OrganizeJournal.InPlace e : journal.reconcile(resolver())) {
+            // Only the owner can open a pending row's stream, and we may have left it pending.
+            try { setPending(e.uri, 0); } catch (Exception ignore) {}
+            boolean saved = overwrite(e.uri, e.redo, e.rel, e.name, e.mime) == Overwrite.DONE;
+            if (!saved) {
+                // No write access any more (the consent grant may not survive a reboot): keep the
+                // bytes as a new photo instead.
+                MediaImage copy = new MediaImage(-1, e.name, null, null, 0, 0, false, e.mime, 0, 0, null);
+                saved = insertAndWrite(copy, e.name, e.mime, e.rel, null, false,
+                        os -> Io.copyFileTo(e.redo, os)) != null;
+            }
+            if (saved) e.redo.delete();
+            else journal.beginInPlace(e.id, e.uri, e.rel, e.name, e.mime); // retry next run
+        }
     }
 
     private boolean publishViaMediaStoreInsert(MediaImage img, File temp, CompressMode mode,
@@ -282,13 +312,13 @@ public class Mover {
         Uri newUri = insertAndWrite(img, newName, mode.mime, newRel, volumeName, true,
                 os -> Io.copyFileTo(temp, os));
         if (newUri == null) return false;
+        // Logged before the original goes: a crash in between leaves a duplicate, not nothing.
+        journal.complete(img.id);
         if (!removeOriginal(img.contentUri())) {
             Log.d(TAG, "INS neither delete nor trash worked — rolling back newUri=" + newUri);
             safeDelete(newUri);
-            journal.abort(img.id);
             return false;
         }
-        journal.complete(img.id);
         return true;
     }
 
