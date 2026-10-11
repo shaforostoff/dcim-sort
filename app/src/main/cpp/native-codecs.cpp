@@ -335,8 +335,9 @@ static std::vector<uint8_t> buildExifApp1(const std::vector<uint8_t> &tiffBuf) {
     return seg;
 }
 
-// Builds the 90-byte MPF APP2 segment (CIPA DC-007). baseJpegSize is the raw jpegli output size;
-// the gainmap data offset from the end of this segment equals baseJpegSize - 2 (strips SOI).
+// Builds the 90-byte MPF APP2 segment (CIPA DC-007). baseJpegSize is the raw jpegli output size.
+// MP entry offsets count from the MP endian field ("II", segment byte 8), not from the segment end:
+// the gainmap follows this segment's remaining 82 bytes plus the base JPEG minus its SOI.
 static std::vector<uint8_t> buildMpfApp2(uint32_t baseJpegSize, uint32_t gainmapSize) {
     auto le32 = [](uint8_t *p, uint32_t v) {
         p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24;
@@ -367,7 +368,7 @@ static std::vector<uint8_t> buildMpfApp2(uint32_t baseJpegSize, uint32_t gainmap
     // size=0, offset=0 for primary (already zeroed)
     // Gainmap MP entry at seg pos 74
     le32(&s[78], gainmapSize);
-    le32(&s[82], baseJpegSize - 2); // data offset from end of MPF = base size minus SOI
+    le32(&s[82], 82 + baseJpegSize - 2); // from the endian field: rest of MPF + base minus SOI
     return s;
 }
 
@@ -519,7 +520,7 @@ Java_com_shaforostoff_dcimsort_codec_NativeCodecs_nativeEncodeJpegR(
     std::vector<uint8_t> exifSeg;
     if (!tiff.empty()) exifSeg = buildExifApp1(tiff);
     std::vector<uint8_t> xmpSeg = buildXmpApp1(params);
-    // MPF gainmap offset = baseJpeg.size() - 2 regardless of how many APP segments we prepend.
+    // The MPF gainmap offset is relative to the MPF segment, so APP segments before it don't matter.
     std::vector<uint8_t> mpfSeg = buildMpfApp2(
             (uint32_t) baseJpeg.size(), (uint32_t) gmJpeg.size());
 
