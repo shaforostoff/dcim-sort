@@ -286,7 +286,7 @@ public class MediaRepository {
 
     /** Numeric MediaStore {@code _ID} from a URI's last segment, or -1 if it isn't a plain id. */
     private static long idFromUri(Uri uri) {
-        if (uri == null) return -1;
+        if (uri == null || !carriesMediaStoreId(uri)) return -1;
         String seg = uri.getLastPathSegment();
         if (seg == null) return -1;
         int colon = seg.lastIndexOf(':'); // DocumentsProvider form "image:1234"
@@ -297,6 +297,26 @@ public class MediaRepository {
         }
         try { return Long.parseLong(seg); }
         catch (NumberFormatException e) { return -1; }
+    }
+
+    /**
+     * True when the URI's numeric tail is a MediaStore {@code _ID}: MediaStore itself, its documents
+     * provider, the photo picker's local items, and Downloads' "msf:" (MediaStore file) documents.
+     * Other providers number their own items (Downloads' plain "42" is a download id), and reading
+     * those as MediaStore ids would organize some other photo.
+     */
+    private static boolean carriesMediaStoreId(Uri uri) {
+        String authority = uri.getAuthority();
+        if ("com.android.providers.media.documents".equals(authority)) return true;
+        if ("com.android.providers.downloads.documents".equals(authority)) {
+            String seg = uri.getLastPathSegment();
+            return seg != null && seg.startsWith("msf:");
+        }
+        if (!"media".equals(authority)) return false;
+        List<String> segs = uri.getPathSegments();
+        // Picker URIs name their source; only the local one hands out MediaStore ids.
+        return segs.isEmpty() || !segs.get(0).startsWith("picker")
+                || segs.contains("com.android.providers.media.photopicker");
     }
 
     /**
