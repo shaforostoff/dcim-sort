@@ -8,6 +8,7 @@ import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +24,9 @@ public class PlaceResolver {
     private final NominatimClient online;
     // Per-cell locks so concurrent callers for the same uncached cell do one lookup, not N.
     private final ConcurrentHashMap<String, Object> inFlight = new ConcurrentHashMap<>();
+    // Cells whose lookup failed this run. Not persisted (a later run retries), but remembered so an
+    // offline run costs one attempt per cell rather than one per photo.
+    private final Set<String> failed = ConcurrentHashMap.newKeySet();
 
     public PlaceResolver(Context ctx, GeoCache cache) {
         this.cache = cache;
@@ -44,24 +48,29 @@ public class PlaceResolver {
         if (cache.contains(key)) {
             return cache.get(key);
         }
+        if (failed.contains(key)) return null;
         // Serialize lookups for the same cell so parallel callers (Preview/Organize pools) collapse
         // to a single geocoder/network request; the first writes the cache, the rest read it.
         Object lock = inFlight.computeIfAbsent(key, k -> new Object());
         synchronized (lock) {
-            if (cache.contains(key)) {
+            if (cache.contains(key) || failed.contains(key)) {
                 return cache.get(key);
             }
             String place = lookup(lat, lon);
-            cache.put(key, place); // caches empty for "not found"
+            // "" caches "no place here"; a failure must not, or one offline run blanks the cell forever.
+            if (place != null) cache.put(key, place);
+            else failed.add(key);
             inFlight.remove(key);
-            return place;
+            return place == null || place.isEmpty() ? null : place;
         }
     }
 
+    /** Place name, "" when a source answered that there is none, or null when every lookup failed. */
     private String lookup(double lat, double lon) {
         String place = geocode(lat, lon);
-        if (place == null) {
-            place = online.reverse(lat, lon);
+        if (place == null || place.isEmpty()) {
+            String o = online.reverse(lat, lon);
+            if (o != null) place = o;
         }
         return place;
     }
@@ -103,15 +112,16 @@ public class PlaceResolver {
         return result[0];
     }
 
+    /** The best name in a successful geocoder answer, or "" when it has none. */
     private static String pick(List<Address> list) {
-        if (list == null || list.isEmpty()) return null;
+        if (list == null || list.isEmpty()) return "";
         Address a = list.get(0);
-        if (a == null) return null;
+        if (a == null) return "";
         if (notEmpty(a.getLocality())) return a.getLocality();
         if (notEmpty(a.getSubAdminArea())) return a.getSubAdminArea();
         if (notEmpty(a.getAdminArea())) return a.getAdminArea();
         if (notEmpty(a.getCountryName())) return a.getCountryName();
-        return null;
+        return "";
     }
 
     private static boolean notEmpty(String s) {

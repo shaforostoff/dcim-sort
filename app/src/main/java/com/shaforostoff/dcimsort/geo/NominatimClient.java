@@ -23,7 +23,10 @@ public class NominatimClient {
     private final Object lock = new Object();
     private long lastRequestAt = 0;
 
-    /** @return a place name (city/town/village) or null. Blocking; call off the main thread. */
+    /**
+     * @return a place name (city/town/village), "" when the service knows none here, or null when
+     * the lookup failed (offline, rate-limited, ...). Blocking; call off the main thread.
+     */
     public String reverse(double lat, double lon) {
         rateLimit();
         HttpURLConnection conn = null;
@@ -39,7 +42,8 @@ public class NominatimClient {
             if (conn.getResponseCode() != 200) return null;
             try (JsonReader r = new JsonReader(
                     new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                return parse(r);
+                String place = parse(r);
+                return place != null ? place : "";
             }
         } catch (Exception e) {
             return null;
