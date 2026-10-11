@@ -42,7 +42,7 @@ import java.util.Map;
  */
 public class Recompressor {
     /** Cap on the longest side so huge sensors don't OOM and stay within HEVC encoder limits. */
-    private static final int MAX_LONG_SIDE = 4096;
+    static final int MAX_LONG_SIDE = 4096;
     /** Stop timeout for the HEVC/AV1 image writers. */
     private static final long ENCODE_TIMEOUT_US = 12_000_000L;
 

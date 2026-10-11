@@ -61,6 +61,16 @@ public final class SizeEstimator {
         return Math.max(1, Math.min(samples, Math.min(byCpu, byMemory)));
     }
 
+    /**
+     * Megapixels {@code img} has once its longest side is capped at {@code longSide}, the size the
+     * encoder actually sees. Bytes per megapixel only carries over between sizes per encoded pixel.
+     */
+    static double cappedMp(MediaImage img, int longSide) {
+        int longest = Math.max(img.width, img.height);
+        double scale = longSide > 0 && longest > longSide ? longSide / (double) longest : 1;
+        return img.megapixels() * scale * scale;
+    }
+
     /** Cooperative cancellation so stale/aborted estimates stop quickly. */
     public interface Cancel {
         boolean cancelled();
@@ -92,7 +102,8 @@ public final class SizeEstimator {
                 futures.add(pool.submit(() -> {
                     if (cancel != null && cancel.cancelled()) return null;
                     long bytes = rc.encodedSize(img.contentUri(), mode, quality, CALIBRATION_LONG_SIDE);
-                    return bytes > 0 ? new double[]{bytes, img.megapixels()} : null;
+                    return bytes > 0
+                            ? new double[]{bytes, cappedMp(img, CALIBRATION_LONG_SIDE)} : null;
                 }));
             }
             long sumBytes = 0;
@@ -133,7 +144,7 @@ public final class SizeEstimator {
                 est += m.size; // favorites are moved untouched, not compressed
                 continue;
             }
-            double mp = m.megapixels();
+            double mp = cappedMp(m, Recompressor.MAX_LONG_SIDE);
             long e = mp > 0 ? (long) (ratio * mp) : m.size;
             if (e > m.size && m.size > 0) e = m.size;
             // skip-low-gain: too little saved → keep the original instead of compressing.
