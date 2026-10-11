@@ -151,7 +151,12 @@ public class OrganizeService extends Service {
                     }
                     Mover.Outcome o;
                     try {
-                        if (copy) {
+                        if (copy && folder == null && temp == null && img.isMovable()) {
+                            // No new folder and no new bytes: a copy would only duplicate the
+                            // photo in place. A null temp here is a failed encode or low gain.
+                            o = recompress && !lowGain
+                                    ? Mover.Outcome.FAILED : Mover.Outcome.SKIPPED;
+                        } else if (copy) {
                             // A null temp (no recompress, low gain, or failed encode) copies exactly.
                             o = outcome(mover.importCopy(
                                     img, temp, req.mode, srcRel, folder, req.volumeName));

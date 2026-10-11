@@ -138,10 +138,10 @@ public class Mover {
      * Destination relative path for a newly inserted row. The images/media collection only accepts
      * DCIM/ or Pictures/ as the top-level directory, so anything else is redirected under DCIM/Camera/.
      */
-    private static String insertableRelativePath(String sourceRel, String folder) {
+    static String insertableRelativePath(String sourceRel, String folder) {
         String newRel = childRelativePath(sourceRel, folder);
         if (!newRel.startsWith("DCIM/") && !newRel.startsWith("Pictures/")) {
-            newRel = "DCIM/Camera/" + folder + "/";
+            newRel = childRelativePath("DCIM/Camera/", folder);
         }
         return newRel;
     }
@@ -342,7 +342,8 @@ public class Mover {
     // ---- Import a copy (keep original) -------------------------------------
 
     /**
-     * Writes an organized <em>copy</em> into {@code folder} and leaves the original untouched.
+     * Writes an organized <em>copy</em> into {@code folder} (null: the source folder) and leaves the
+     * original untouched.
      * When {@code recompressedTemp} is non-null those (already recompressed) bytes are written;
      * otherwise the original bytes are streamed from {@code img.readUri()} — which may be a photo
      * picker / cloud URI with no MediaStore row. Used for "Keep original" and for any pick that
@@ -350,7 +351,6 @@ public class Mover {
      */
     public boolean importCopy(MediaImage img, File recompressedTemp, CompressMode mode,
                               String sourceRel, String folder, String volumeName) {
-        if (folder == null) return false;
         boolean recompress = recompressedTemp != null;
         String newRel = insertableRelativePath(sourceRel, folder);
         String mime = recompress ? mode.mime
