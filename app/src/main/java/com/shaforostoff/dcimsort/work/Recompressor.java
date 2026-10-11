@@ -116,7 +116,12 @@ public class Recompressor {
      */
     private File compressToTemp(Uri source, CompressMode mode, int quality, int maxLongSide,
                                 boolean embedExif) {
-        Bitmap bmp = decodeOriented(source, maxLongSide);
+        Bitmap decoded = decodeOriented(source, maxLongSide);
+        if (decoded == null) return null;
+        // jpegli and libavif take 8-bit RGBA only; 10-bit HDR sources decode as RGBA_1010102/F16.
+        Bitmap bmp = decoded.getConfig() == Bitmap.Config.ARGB_8888
+                ? decoded : decoded.copy(Bitmap.Config.ARGB_8888, false);
+        if (bmp != decoded) decoded.recycle();
         if (bmp == null) return null;
         File out = null;
         try {
