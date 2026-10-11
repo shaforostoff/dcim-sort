@@ -42,7 +42,7 @@ public final class SizeEstimator {
     /**
      * Calibration encodes at a reduced resolution: bytes-per-megapixel is roughly
      * resolution-invariant, so a smaller decode/encode gives nearly the same ratio far faster and
-     * with much less RAM than the full-resolution output path ({@code Recompressor.MAX_LONG_SIDE}).
+     * with much less RAM than the output path ({@code Recompressor.maxLongSide}).
      */
     private static final int CALIBRATION_LONG_SIDE = 2048;
 
@@ -144,7 +144,7 @@ public final class SizeEstimator {
                 est += m.size; // favorites are moved untouched, not compressed
                 continue;
             }
-            double mp = cappedMp(m, Recompressor.MAX_LONG_SIDE);
+            double mp = cappedMp(m, Recompressor.maxLongSide(mode));
             long e = mp > 0 ? (long) (ratio * mp) : m.size;
             if (e > m.size && m.size > 0) e = m.size;
             // skip-low-gain: too little saved → keep the original instead of compressing.

@@ -41,8 +41,8 @@ import java.util.Map;
  * HEIC/AVIF (it would need a separate {@code mime} item).
  */
 public class Recompressor {
-    /** Cap on the longest side so huge sensors don't OOM and stay within HEVC encoder limits. */
-    static final int MAX_LONG_SIDE = 4096;
+    /** Longest side the platform HEVC/AV1 image encoders are fed; they reject larger frames. */
+    private static final int PLATFORM_CODEC_MAX_LONG_SIDE = 4096;
     /** Stop timeout for the HEVC/AV1 image writers. */
     private static final long ENCODE_TIMEOUT_US = 12_000_000L;
 
@@ -97,7 +97,17 @@ public class Recompressor {
      * @return the temp file, or null on failure.
      */
     public File compressToTemp(Uri source, CompressMode mode, int quality) {
-        return compressToTemp(source, mode, quality, MAX_LONG_SIDE, true);
+        return compressToTemp(source, mode, quality, maxLongSide(mode), true);
+    }
+
+    /**
+     * Longest output side for {@code mode}, or 0 for full resolution. Only the platform encoders
+     * need a cap; WebP, jpegli and libavif keep every pixel of the original they replace.
+     */
+    static int maxLongSide(CompressMode mode) {
+        boolean platformCodec = mode == CompressMode.HEIC
+                || (mode == CompressMode.AVIF && !NativeCodecs.avifAvailable());
+        return platformCodec ? PLATFORM_CODEC_MAX_LONG_SIDE : 0;
     }
 
     /**
@@ -154,7 +164,11 @@ public class Recompressor {
 
     // ---- Decoding -----------------------------------------------------------
 
-    /** Decodes an image with EXIF orientation applied to pixels, downsampled to maxLongSide. */
+    /**
+     * Decodes an image with EXIF orientation applied to pixels, downsampled to maxLongSide (0: full
+     * size). A capped decode that fails retries once at half size; a full-size one just fails, so
+     * the original is kept rather than quietly replaced at lower resolution.
+     */
     public Bitmap decodeOriented(Uri uri, int maxLongSide) {
         try {
             if (Sdk.atLeastP()) {
