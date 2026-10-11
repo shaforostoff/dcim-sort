@@ -377,18 +377,22 @@ public class MediaRepository {
         return i >= 0 && !c.isNull(i) ? c.getLong(i) : 0;
     }
 
+    /** SQLite on Android 11 and older rejects a query with more than 999 bound arguments. */
+    private static final int IDS_PER_QUERY = 500;
+
     /** Returns MediaImage objects for the given MediaStore IDs, sorted by DATE_TAKEN DESC. */
     private List<MediaImage> fetchByIds(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) return Collections.emptyList();
-        String[] placeholders = new String[ids.size()];
-        String[] args = new String[ids.size()];
-        for (int i = 0; i < ids.size(); i++) {
-            placeholders[i] = "?";
-            args[i] = String.valueOf(ids.get(i));
-        }
-        String where = MediaStore.Images.Media._ID + " IN (" + TextUtils.join(",", placeholders) + ")";
         List<MediaImage> result = new ArrayList<>();
-        query(IMAGES, where, args, result::add);
+        for (int from = 0; from < ids.size(); from += IDS_PER_QUERY) {
+            List<Long> chunk = ids.subList(from, Math.min(from + IDS_PER_QUERY, ids.size()));
+            String[] args = new String[chunk.size()];
+            for (int i = 0; i < args.length; i++) args[i] = String.valueOf(chunk.get(i));
+            String where = MediaStore.Images.Media._ID + " IN ("
+                    + TextUtils.join(",", Collections.nCopies(args.length, "?")) + ")";
+            query(IMAGES, where, args, result::add);
+        }
+        // Each chunk comes back sorted; restore the order across chunks.
+        Collections.sort(result, (a, b) -> Long.compare(b.dateTakenMillis, a.dateTakenMillis));
         return result;
     }
 
