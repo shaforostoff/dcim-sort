@@ -123,7 +123,6 @@ public class OrganizeService extends Service {
         final AtomicInteger moved = new AtomicInteger();
         final AtomicInteger skipped = new AtomicInteger();
         final AtomicInteger failed = new AtomicInteger();
-        final AtomicInteger sinceFlush = new AtomicInteger();
         final Set<String> destFolders = ConcurrentHashMap.newKeySet();
 
         for (final MediaImage img : req.images) {
@@ -184,10 +183,6 @@ public class OrganizeService extends Service {
                 } finally {
                     int d = done.incrementAndGet();
                     publish(d, total, currentFolder);
-                    if (sinceFlush.incrementAndGet() >= 25) {
-                        sinceFlush.set(0);
-                        targets.flush();
-                    }
                 }
             });
         }
@@ -204,7 +199,6 @@ public class OrganizeService extends Service {
         } catch (InterruptedException ignore) {
             Thread.currentThread().interrupt();
         }
-        targets.flush();
         journal.close();
 
         // The batch just freed a burst of large native encode buffers (jpegli/libavif). Nudge the

@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  * thousands of nearby photos cost at most one lookup per cell.
  */
 public class PlaceResolver {
-    private final GeoCache cache;
+    private final GeoDb cache;
     private final Geocoder geocoder;        // null if not present on device
     private final NominatimClient online;
     // Per-cell locks so concurrent callers for the same uncached cell do one lookup, not N.
@@ -28,8 +28,8 @@ public class PlaceResolver {
     // offline run costs one attempt per cell rather than one per photo.
     private final Set<String> failed = ConcurrentHashMap.newKeySet();
 
-    public PlaceResolver(Context ctx, GeoCache cache) {
-        this.cache = cache;
+    public PlaceResolver(Context ctx) {
+        this.cache = GeoDb.get(ctx);
         Geocoder g = null;
         try {
             if (Geocoder.isPresent()) {
@@ -44,25 +44,36 @@ public class PlaceResolver {
 
     /** @return place name, or null if unknown. Blocking; call off the main thread. */
     public String resolve(double lat, double lon) {
-        String key = GeoCache.cellKey(lat, lon);
-        if (cache.contains(key)) {
-            return cache.get(key);
-        }
-        if (failed.contains(key)) return null;
+        String key = cellKey(lat, lon);
+        String cached = cache.place(key);
+        if (cached != null || failed.contains(key)) return nameOrNull(cached);
         // Serialize lookups for the same cell so parallel callers (Preview/Organize pools) collapse
         // to a single geocoder/network request; the first writes the cache, the rest read it.
         Object lock = inFlight.computeIfAbsent(key, k -> new Object());
         synchronized (lock) {
-            if (cache.contains(key) || failed.contains(key)) {
-                return cache.get(key);
-            }
+            cached = cache.place(key);
+            if (cached != null || failed.contains(key)) return nameOrNull(cached);
             String place = lookup(lat, lon);
             // "" caches "no place here"; a failure must not, or one offline run blanks the cell forever.
-            if (place != null) cache.put(key, place);
+            if (place != null) cache.putPlace(key, place);
             else failed.add(key);
             inFlight.remove(key);
-            return place == null || place.isEmpty() ? null : place;
+            return nameOrNull(place);
         }
+    }
+
+    private static String nameOrNull(String place) {
+        return place == null || place.isEmpty() ? null : place;
+    }
+
+    /** Snaps a coordinate to a ~10–11 km grid cell, adjusting longitude width by latitude. */
+    static String cellKey(double lat, double lon) {
+        long latCell = Math.round(lat / 0.1);
+        double centerLat = latCell * 0.1;
+        double cosLat = Math.max(0.05, Math.cos(Math.toRadians(centerLat)));
+        double lonStep = 0.1 / cosLat;
+        long lonCell = Math.round(lon / lonStep);
+        return latCell + "," + lonCell;
     }
 
     /** Place name, "" when a source answered that there is none, or null when every lookup failed. */

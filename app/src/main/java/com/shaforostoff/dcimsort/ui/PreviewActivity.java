@@ -217,11 +217,7 @@ public class PreviewActivity extends Activity {
                 }
                 main.post(() -> showFolders(list));
             } finally {
-                // Persist whatever was resolved on EVERY exit path — including Back mid-flight —
-                // so partial cold-cache work (resolved places + per-image GPS) survives and the
-                // next Preview reuses it instead of starting cold again.
                 if (geoPool != null) geoPool.shutdownNow();
-                targets.flush();
             }
         });
     }
