@@ -6,6 +6,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
+import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
 
@@ -15,6 +16,7 @@ import com.shaforostoff.dcimsort.util.Io;
 import com.shaforostoff.dcimsort.util.Sdk;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -104,7 +106,7 @@ public class Mover {
         if (!srcFile.exists()) return Outcome.FAILED;
         File parent = srcFile.getParentFile();
         if (parent != null && parent.getName().equalsIgnoreCase(folder)) return Outcome.SKIPPED;
-        File destDir = legacyDestDir(srcFile, folder);
+        File destDir = legacyDestDir(parent, folder);
         if (destDir == null) return Outcome.FAILED;
         File dst = uniqueFile(destDir, srcFile.getName());
         boolean ok = srcFile.renameTo(dst);
@@ -122,14 +124,34 @@ public class Mover {
     }
 
     /**
-     * Legacy (pre-Q) destination: {@code folder} beside the original, or the original's own
-     * directory without grouping. Created if needed; null if that fails.
+     * Legacy (pre-Q) destination: {@code folder} inside {@code parent} (the original's directory),
+     * or {@code parent} itself without grouping. Created if needed; null if that fails.
      */
-    private static File legacyDestDir(File srcFile, String folder) {
-        File parent = srcFile.getParentFile();
+    private static File legacyDestDir(File parent, String folder) {
         if (parent == null) return null;
         File dir = folder == null ? parent : new File(parent, folder);
         return dir.exists() || dir.mkdirs() ? dir : null;
+    }
+
+    /**
+     * Legacy (pre-Q) write: fills a hidden temp file in {@code destDir}, renames it to a unique
+     * {@code name} and scans it. Returns the new file, or null on failure (nothing left behind).
+     */
+    private File writeLegacy(File destDir, String name, StreamWriter writer) {
+        File dst = uniqueFile(destDir, name);
+        File tmp = new File(destDir, "." + dst.getName() + ".tmp");
+        try (OutputStream os = new FileOutputStream(tmp)) {
+            writer.write(os);
+        } catch (IOException e) {
+            tmp.delete();
+            return null;
+        }
+        if (!tmp.renameTo(dst)) {
+            tmp.delete();
+            return null;
+        }
+        scan(dst.getAbsolutePath());
+        return dst;
     }
 
     // ---- Shared MediaStore insert plumbing ---------------------------------
@@ -352,17 +374,33 @@ public class Mover {
     public boolean importCopy(MediaImage img, File recompressedTemp, CompressMode mode,
                               String sourceRel, String folder, String volumeName) {
         boolean recompress = recompressedTemp != null;
-        String newRel = insertableRelativePath(sourceRel, folder);
         String mime = recompress ? mode.mime
                 : (img.mimeType != null ? img.mimeType : "image/jpeg");
         String ext = recompress ? mode.extension : extensionFromName(img.displayName);
         String newName = baseName(img.displayName) + ext;
 
-        // The original is deliberately left intact.
-        return insertAndWrite(img, newName, mime, newRel, volumeName, false, os -> {
+        StreamWriter writer = os -> {
             if (recompress) Io.copyFileTo(recompressedTemp, os);
             else copyFromUri(img.readUri(), os);
-        }) != null;
+        };
+        // The original is deliberately left intact.
+        if (!Sdk.atLeastQ()) return importCopyLegacy(img, newName, folder, writer);
+        return insertAndWrite(img, newName, mime, insertableRelativePath(sourceRel, folder),
+                volumeName, false, writer) != null;
+    }
+
+    /**
+     * Pre-Q MediaStore has no RELATIVE_PATH or IS_PENDING to insert with, so the copy is written as
+     * a file: beside the original, or under DCIM/Camera for picks that have no file of their own.
+     */
+    @SuppressWarnings("deprecation") // getExternalStoragePublicDirectory: fine before Q
+    private boolean importCopyLegacy(MediaImage img, String newName, String folder,
+                                     StreamWriter writer) {
+        File base = img.dataPath != null ? new File(img.dataPath).getParentFile()
+                : new File(Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DCIM), "Camera");
+        File destDir = legacyDestDir(base, folder);
+        return destDir != null && writeLegacy(destDir, newName, writer) != null;
     }
 
     private void copyFromUri(Uri uri, OutputStream out) throws IOException {
@@ -383,24 +421,13 @@ public class Mover {
     private boolean publishLegacy(MediaImage img, File temp, CompressMode mode, String folder) {
         if (img.dataPath == null) return false;
         File srcFile = new File(img.dataPath);
-        File destDir = legacyDestDir(srcFile, folder);
+        File destDir = legacyDestDir(srcFile.getParentFile(), folder);
         if (destDir == null) return false;
-        File dst = uniqueFile(destDir, baseName(srcFile.getName()) + mode.extension);
-        File tmp = new File(destDir, "." + dst.getName() + ".tmp");
-        try {
-            Io.copyFile(temp, tmp);
-            if (!tmp.renameTo(dst)) {
-                tmp.delete();
-                return false;
-            }
-            scan(dst.getAbsolutePath());
-            boolean del = srcFile.delete();
-            scan(srcFile.getAbsolutePath());
-            return del;
-        } catch (IOException e) {
-            tmp.delete();
-            return false;
-        }
+        if (writeLegacy(destDir, baseName(srcFile.getName()) + mode.extension,
+                os -> Io.copyFileTo(temp, os)) == null) return false;
+        boolean del = srcFile.delete();
+        scan(srcFile.getAbsolutePath());
+        return del;
     }
 
     private boolean verify(Uri uri) {
